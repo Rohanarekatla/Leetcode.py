@@ -1,0 +1,87 @@
+class Node:
+    def __init__(self, data):
+        self.data = data
+        self.next = None
+
+class LinkedList:
+    def __init__(self):
+        self.head = None
+
+    def insert_start(self, data):
+        new_node = Node(data)
+        new_node.next = self.head
+        self.head = new_node
+
+    def insert_last(self, data):
+        new_node = Node(data)
+        if self.head is None:
+            self.head = new_node
+            return
+        temp = self.head
+        while temp.next is not None:
+            temp = temp.next
+        temp.next = new_node
+
+    def calc_size(self):
+        size = 0
+        temp = self.head
+        while temp is not None:
+            temp = temp.next
+            size += 1
+        return size
+
+    def insert_position(self, pos, data):
+        size = self.calc_size()
+
+        if pos < 1 or size < pos:
+            print("Can't insert at position", pos, "is not a valid position")
+            return
+
+        new_node = Node(data)
+        temp = self.head
+
+        if pos == 1:
+            new_node.next = self.head
+            self.head = new_node
+            return
+
+        for _ in range(pos - 2):
+            temp = temp.next
+
+        new_node.next = temp.next
+        temp.next = new_node
+
+    def delete(self, pos):
+        size = self.calc_size()
+
+        if pos < 1 or size < pos:
+            print("Can't delete at position", pos, "is not a valid position")
+            return
+
+        if pos == 1:
+            self.head = self.head.next
+            return
+
+        temp = self.head
+        for _ in range(pos - 2):
+            temp = temp.next
+
+        temp.next = temp.next.next
+
+    def display(self):
+        temp = self.head
+        while temp is not None:
+            print(temp.data, end=" -> ")
+            temp = temp.next
+        print("None")
+
+
+ll = LinkedList()
+ll.insert_start(5)
+ll.insert_start(6)
+ll.insert_start(7)
+ll.insert_last(4)
+ll.insert_last(3)
+ll.insert_position(2, 8)
+ll.delete(1)
+ll.display()
