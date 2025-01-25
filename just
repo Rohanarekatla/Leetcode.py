@@ -1,32 +1,18 @@
-import configparser
-
-# Define the file name for mappings
-mapping_file = "mappings.txt"
-
-# Function to load all mappings from a file
 def load_all_mappings(file_path):
-    config = configparser.ConfigParser(allow_no_value=True, delimiters=":")
-    config.optionxform = str  # Preserve case sensitivity
-    config.read(file_path)
-
     mappings = {}
-    for section in config.sections():
-        mappings[section] = {key.strip(): value.strip() for key, value in config.items(section)}
+    current_mapping = None
+
+    with open(file_path, "r") as f:
+        for line in f:
+            line = line.strip()
+
+            # Check if it's a new mapping section
+            if line.startswith("[") and line.endswith("]"):
+                current_mapping = line[1:-1]  # Get section name without brackets
+                mappings[current_mapping] = {}
+            elif ":" in line and current_mapping:
+                # Parse key-value pairs
+                key, value = line.split(":")
+                mappings[current_mapping][key.strip()] = value.strip()
+
     return mappings
-
-# Load all mappings from the file
-all_mappings = load_all_mappings(mapping_file)
-
-# Example usage
-locationnum = "09"
-selected_mapping = "mapping1"
-
-if selected_mapping in all_mappings:
-    bidirectional_mapping = all_mappings[selected_mapping]
-    if locationnum in bidirectional_mapping:
-        mapped_value = bidirectional_mapping[locationnum]
-        print(f"Location {locationnum} maps to {mapped_value} in {selected_mapping}")
-    else:
-        print(f"Location {locationnum} not found in {selected_mapping}")
-else:
-    print(f"Mapping {selected_mapping} not found.")
