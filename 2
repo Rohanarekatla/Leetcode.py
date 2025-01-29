@@ -1,29 +1,8 @@
-# Configure the Snowflake provider
-provider "snowflake" {
-  # Provider configuration here
+data "snowflake_sql_query" "account_name" {
+  sql = "SELECT CURRENT_ACCOUNT_NAME()"
 }
 
-# Method 1: Using current_account data source
-data "snowflake_current_account" "this" {}
-
-# Method 2: Using system_get_snowflake_platform_info data source
-data "snowflake_system_get_snowflake_platform_info" "this" {}
-
-# Method 3: Using system_get_privatelink_config data source
-data "snowflake_system_get_privatelink_config" "this" {}
-
-# Output all available information
-output "account_info" {
-  value = {
-    # From current_account
-    account_locator = data.snowflake_current_account.this.account
-    region         = data.snowflake_current_account.this.region
-    url            = data.snowflake_current_account.this.url
-
-    # From platform info
-    platform_info = data.snowflake_system_get_snowflake_platform_info.this
-
-    # From privatelink config
-    account_details = data.snowflake_system_get_privatelink_config.this
-  }
+# Output the result
+output "account_name" {
+  value = data.snowflake_sql_query.account_name.rows[0][0]
 }
