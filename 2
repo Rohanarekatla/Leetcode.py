@@ -1,8 +1,20 @@
-data "snowflake_sql_query" "account_name" {
-  sql = "SELECT CURRENT_ACCOUNT_NAME()"
+# Get current account locator and region
+data "snowflake_current_account" "current" {}
+
+# List all accessible accounts
+data "snowflake_accounts" "all" {}
+
+# Extract the human-readable name
+locals {
+  current_account = data.snowflake_current_account.current
+  account_name = [
+    for acc in data.snowflake_accounts.all.accounts : 
+    acc.name
+    if acc.locator == local.current_account.account && acc.region == local.current_account.region
+  ][0]
 }
 
 # Output the result
-output "account_name" {
-  value = data.snowflake_sql_query.account_name.rows[0][0]
+output "human_readable_account_name" {
+  value = local.account_name
 }
