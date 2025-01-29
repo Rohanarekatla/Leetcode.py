@@ -1,88 +1,29 @@
-# Enable preview features for failover groups
-resource "snowflake_account_parameter" "enable_preview" {
-  key   = "ENABLE_PREVIEW_FEATURES"
-  value = true
+# Configure the Snowflake provider
+provider "snowflake" {
+  # Provider configuration here
 }
 
-# Create a primary database
-resource "snowflake_database" "primary_db" {
-  name = "PRIMARY_DB"
-}
+# Method 1: Using current_account data source
+data "snowflake_current_account" "this" {}
 
-# Create a secondary database
-resource "snowflake_database" "secondary_db" {
-  name = "SECONDARY_DB"
-}
+# Method 2: Using system_get_snowflake_platform_info data source
+data "snowflake_system_get_snowflake_platform_info" "this" {}
 
-# Configure the failover group
-resource "snowflake_failover_group" "example_group" {
-  provider = snowflake.account_admin  # Make sure to use ACCOUNTADMIN role
-  name     = "EXAMPLE_FAILOVER_GROUP"
-  
-  # Specify the object types to be replicated
-  allowed_object_types = [
-    "DATABASE",
-    "SCHEMA",
-    "TABLE",
-    "SEQUENCE",
-    "FUNCTION",
-    "PROCEDURE"
-  ]
-  
-  # Define replication schedule (optional)
-  replication_schedule = "10 MINUTE"
-  
-  # Specify the source objects to be replicated
-  source_objects {
-    database_name = snowflake_database.primary_db.name
+# Method 3: Using system_get_privatelink_config data source
+data "snowflake_system_get_privatelink_config" "this" {}
+
+# Output all available information
+output "account_info" {
+  value = {
+    # From current_account
+    account_locator = data.snowflake_current_account.this.account
+    region         = data.snowflake_current_account.this.region
+    url            = data.snowflake_current_account.this.url
+
+    # From platform info
+    platform_info = data.snowflake_system_get_snowflake_platform_info.this
+
+    # From privatelink config
+    account_details = data.snowflake_system_get_privatelink_config.this
   }
-  
-  # Define secondary accounts
-  secondary_accounts {
-    # Replace with your secondary account locator
-    account_locator = "YOUR_SECONDARY_ACCOUNT_LOCATOR"
-    # Optional: specify secondary account name
-    account_name    = "SECONDARY_ACCOUNT"
-  }
-
-  # Enable automatic failover (optional)
-  enable_automatic_failover = true
-  
-  depends_on = [
-    snowflake_account_parameter.enable_preview
-  ]
-}
-
-# Grant usage on the failover group
-resource "snowflake_failover_group_grant" "example_grant" {
-  failover_group_name = snowflake_failover_group.example_group.name
-  privilege          = "USAGE"
-  roles              = ["SYSADMIN"]
-
-  depends_on = [
-    snowflake_failover_group.example_group
-  ]
-}
-
-# Optional: Create a dedicated role for failover management
-resource "snowflake_role" "failover_admin" {
-  name = "FAILOVER_ADMIN"
-}
-
-# Grant necessary privileges to the failover admin role
-resource "snowflake_role_grants" "failover_admin_grants" {
-  role_name = snowflake_role.failover_admin.name
-  
-  roles = [
-    "SYSADMIN",
-  ]
-}
-
-# Output the failover group details
-output "failover_group_name" {
-  value = snowflake_failover_group.example_group.name
-}
-
-output "replication_schedule" {
-  value = snowflake_failover_group.example_group.replication_schedule
 }
