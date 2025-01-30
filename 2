@@ -1,20 +1,14 @@
-# Get current account locator and region
-data "snowflake_current_account" "current" {}
+def mappingfun(file_path, locationnum, selected_mapping):
+    all_mappings = load_all_mappings(file_path)
 
-# List all accessible accounts
-data "snowflake_accounts" "all" {}
+    if selected_mapping in all_mappings:
+        bidirectional_mapping_all = all_mappings[selected_mapping]
 
-# Extract the human-readable name
-locals {
-  current_account = data.snowflake_current_account.current
-  account_name = [
-    for acc in data.snowflake_accounts.all.accounts : 
-    acc.name
-    if acc.locator == local.current_account.account && acc.region == local.current_account.region
-  ][0]
-}
+        if locationnum in bidirectional_mapping_all:
+            return bidirectional_mapping_all[locationnum]
+        elif locationnum in bidirectional_mapping_all.values():
+            for key, value in bidirectional_mapping_all.items():
+                if value == locationnum:
+                    return key
 
-# Output the result
-output "human_readable_account_name" {
-  value = local.account_name
-}
+    return None
