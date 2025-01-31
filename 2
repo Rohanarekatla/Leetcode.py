@@ -1,14 +1,46 @@
-def mappingfun(file_path, locationnum, selected_mapping):
-    all_mappings = load_all_mappings(file_path)
+# Configure the null_resource to run SnowSQL commands
+resource "null_resource" "snowsql_command" {
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    
+    # Using environment variables for sensitive information
+    environment = {
+      SNOWSQL_ACCOUNT     = var.snowflake_account
+      SNOWSQL_USER        = var.snowflake_user
+      SNOWSQL_ROLE        = var.snowflake_role
+      OAUTH_REFRESH_TOKEN = var.oauth_refresh_token
+    }
 
-    if selected_mapping in all_mappings:
-        bidirectional_mapping_all = all_mappings[selected_mapping]
+    # Correct SnowSQL command syntax for OAuth
+    command = <<-EOT
+      snowsql \
+        -a $SNOWSQL_ACCOUNT \
+        -u $SNOWSQL_USER \
+        --authenticator externalbrowser \
+        -r $SNOWSQL_ROLE \
+        -q "SELECT CURRENT_USER();"
+    EOT
+  }
+}
 
-        if locationnum in bidirectional_mapping_all:
-            return bidirectional_mapping_all[locationnum]
-        elif locationnum in bidirectional_mapping_all.values():
-            for key, value in bidirectional_mapping_all.items():
-                if value == locationnum:
-                    return key
+# Variables declaration
+variable "snowflake_account" {
+  description = "Snowflake account identifier (without snowflakecomputing.com)"
+  type        = string
+}
 
-    return None
+variable "snowflake_user" {
+  description = "Snowflake username"
+  type        = string
+}
+
+variable "snowflake_role" {
+  description = "Snowflake role to use"
+  type        = string
+}
+
+variable "oauth_refresh_token" {
+  description = "OAuth refresh token"
+  type        = string
+  sensitive   = true
+}
