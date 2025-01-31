@@ -1,46 +1,11 @@
-# Configure the null_resource to run SnowSQL commands
-resource "null_resource" "snowsql_command" {
+resource "null_resource" "run_snowsql" {
   provisioner "local-exec" {
-    interpreter = ["bash", "-c"]
-    
-    # Using environment variables for sensitive information
-    environment = {
-      SNOWSQL_ACCOUNT     = var.snowflake_account
-      SNOWSQL_USER        = var.snowflake_user
-      SNOWSQL_ROLE        = var.snowflake_role
-      OAUTH_REFRESH_TOKEN = var.oauth_refresh_token
-    }
-
-    # Correct SnowSQL command syntax for OAuth
-    command = <<-EOT
-      snowsql \
-        -a $SNOWSQL_ACCOUNT \
-        -u $SNOWSQL_USER \
-        --authenticator externalbrowser \
-        -r $SNOWSQL_ROLE \
-        -q "SELECT CURRENT_USER();"
+    command = <<EOT
+      snowsql -o authenticator=oauth \
+              -o token="${var.snowflake_oauth_token}" \
+              -o accountname="${var.snowflake_account}" \
+              -o user="${var.snowflake_user}" \
+              -q "SELECT CURRENT_USER();"
     EOT
   }
-}
-
-# Variables declaration
-variable "snowflake_account" {
-  description = "Snowflake account identifier (without snowflakecomputing.com)"
-  type        = string
-}
-
-variable "snowflake_user" {
-  description = "Snowflake username"
-  type        = string
-}
-
-variable "snowflake_role" {
-  description = "Snowflake role to use"
-  type        = string
-}
-
-variable "oauth_refresh_token" {
-  description = "OAuth refresh token"
-  type        = string
-  sensitive   = true
 }
