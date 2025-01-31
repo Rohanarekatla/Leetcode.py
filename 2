@@ -1,11 +1,34 @@
-resource "null_resource" "run_snowsql" {
+
+resource "null_resource" "fetch_snowflake_account" {
   provisioner "local-exec" {
     command = <<EOT
-      snowsql -o authenticator=oauth \
-              -o token="${var.snowflake_oauth_token}" \
-              -o accountname="${var.snowflake_account}" \
-              -o user="${var.snowflake_user}" \
-              -q "SELECT CURRENT_USER();"
+      SNOWFLAKE_ACCESS_TOKEN="${local.token_response.access_token}" \
+      snowsql -a STATESTREET-${var.account}.privatelink \
+        -u ${var.user} -r ${var.role} --authenticator=oauth \
+        -q "SELECT CURRENT_ACCOUNT();" -o output_format=csv -o header=false
     EOT
+
+    # Capturing the output into Terraform
+    environment = {
+      SNOWFLAKE_ACCOUNT_NAME = chomp(self.result)
+    }
   }
+
+  # Trick to capture command output directly in Terraform
+  provisioner "local-exec" {
+    command = "echo ${self.provisioner.local-exec.result}"
+  }
+}
+
+# Assign the captured output to a local variable
+locals {
+  snowflake_account_name = null_resource.fetch_snowflake_account.environment.SNOWFLAKE_ACCOUNT_NAME
+}
+
+
+
+
+
+output "snowflake_account" {
+  value = local.snowflake_account_name
 }
