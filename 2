@@ -1,9 +1,7 @@
-data "external" "snowflake_account" {
-  program = ["bash", "-c", <<EOT
-    SNOWFLAKE_ACCESS_TOKEN="${local.token_response.access_token}" \
-    snowsql -a STATESTREET-${var.account}.privatelink \
-      -u ${var.user} -r ${var.role} --authenticator=oauth \
-      -q "SELECT CURRENT_ACCOUNT();" -o output_format=csv -o header=false | tr -d '\r\n' | jq -R -c '{account: .}'
-  EOT
-  ]
+resource "null_resource" "fetch_snowflake_account_delay" {
+  provisioner "local-exec" {
+    command = "sleep 2"  # Add a 2-second delay
+  }
+
+  depends_on = [null_resource.fetch_snowflake_account]
 }
