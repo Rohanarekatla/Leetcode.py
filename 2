@@ -1,15 +1,2 @@
-data "external" "snowflake_account" {
-  program = ["powershell", "-Command", <<-EOT
-    $env:SNOWFLAKE_ACCESS_TOKEN = '${local.token_response.access_token}';
-    $output = snowsql -a STATESTREET-${var.account}.privatelink `
-      -u ${var.user} -r ${var.role} --authenticator=oauth `
-      -q "SELECT CURRENT_ACCOUNT()" -o output_format=csv -o header=false;
-    $trimmed = $output.Trim();
-    @{account = "$trimmed"} | ConvertTo-Json
-  EOT
-  ]
-}
-
-locals {
-  snowflake_account = data.external.snowflake_account.result.account
+  snowflake_account = regex("\"([^\"]+)\"", local.raw_output)[1]
 }
