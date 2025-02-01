@@ -1,0 +1,8 @@
+resource "snowflake_failover_group" "fg" {
+  for_each = { for fg in data.snowflake_failover_groups.existing.failover_groups : fg.name => fg }
+
+  name                 = each.value.name
+  allowed_accounts     = each.value.allowed_accounts
+  object_types         = each.value.object_types
+  replication_schedule = each.value.replication_schedule
+}
