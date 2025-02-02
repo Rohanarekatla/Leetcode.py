@@ -1,8 +1,25 @@
-resource "snowflake_failover_group" "fg" {
+# failover_groups.tf
+# Get existing failover groups
+data "snowflake_failover_groups" "existing" {}
+
+# Create or manage failover groups
+resource "snowflake_failover_group" "managed_groups" {
   for_each = { for fg in data.snowflake_failover_groups.existing.failover_groups : fg.name => fg }
 
-  name                 = each.value.name
-  allowed_accounts     = each.value.allowed_accounts
-  object_types         = each.value.object_types
-  replication_schedule = each.value.replication_schedule
+  name             = each.value.name
+  allowed_accounts = each.value.allowed_accounts
+  object_types     = each.value.object_types
+
+  replication_schedule {
+    cron {
+      expression = each.value.replication_schedule.cron.expression
+      time_zone  = each.value.replication_schedule.cron.time_zone
+    }
+  }
+}
+
+# outputs.tf
+output "failover_group_names" {
+  description = "Names of all managed failover groups"
+  value       = [for fg in snowflake_failover_group.managed_groups : fg.name]
 }
