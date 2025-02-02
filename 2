@@ -1,21 +1,15 @@
 # locals.tf
 locals {
-  # Extract primary value and process name
-  primary_parts = [
-    for fg in data.snowflake_failover_groups.existing.failover_groups :
-    split("|", fg.primary)
-  ]
-
-  # Get failover group names from primary values
-  failover_group_names = [
-    for parts in local.primary_parts :
-    trimspace(trim(element(parts, length(parts) - 1), "\""))
-  ]
-
-  # Create mapping of failover groups
+  # Create a map with primary as the key to ensure uniqueness
   failover_groups = {
-    for idx, fg in data.snowflake_failover_groups.existing.failover_groups :
-    local.failover_group_names[idx] => fg
+    for fg in data.snowflake_failover_groups.existing.failover_groups :
+    fg.primary => {
+      name             = split("|", fg.primary)[length(split("|", fg.primary)) - 1]
+      allowed_accounts = fg.allowed_accounts
+      object_types     = fg.object_types
+      replication_schedule = fg.replication_schedule
+      primary         = fg.primary
+    }
   }
 }
 
@@ -23,7 +17,7 @@ locals {
 resource "snowflake_failover_group" "managed_groups" {
   for_each = local.failover_groups
 
-  name             = each.key
+  name             = each.value.name
   allowed_accounts = each.value.allowed_accounts
   object_types     = each.value.object_types
 
@@ -36,25 +30,20 @@ resource "snowflake_failover_group" "managed_groups" {
 }
 
 # outputs.tf
-output "failover_group_names" {
-  description = "List of all failover group names"
-  value       = local.failover_group_names
-}
-
-output "primary_values" {
-  description = "Primary values for each failover group"
+output "failover_group_details" {
+  description = "Details of all failover groups"
   value = {
-    for name, group in local.failover_groups : name => split("|", group.primary)
+    for primary, group in local.failover_groups : primary => {
+      name             = group.name
+      allowed_accounts = group.allowed_accounts
+      object_types     = group.object_types
+    }
   }
 }
 
-output "managed_groups" {
-  description = "Details of all managed failover groups"
+output "primary_mappings" {
+  description = "Mapping of primary values to group names"
   value = {
-    for name, group in snowflake_failover_group.managed_groups : name => {
-      allowed_accounts = group.allowed_accounts
-      object_types    = group.object_types
-      schedule        = group.replication_schedule
-    }
+    for primary, group in local.failover_groups : primary => group.name
   }
 }
