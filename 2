@@ -1,0 +1,7 @@
+search_key = "09"
+mapping_file = "mapping.txt"  # Replace with your file name
+
+with open(mapping_file, "r") as file:
+    for line in file:
+        if f"_{search_key}." in line:
+            print(line.strip()) 
