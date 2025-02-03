@@ -3,5 +3,6 @@ mapping_file = "mapping.txt"  # Replace with your file name
 
 with open(mapping_file, "r") as file:
     for line in file:
-        if f"_{search_key}." in line:
-            print(line.strip()) 
+        left_side = line.split(":")[0]  # Extract left part before ':'
+        if f"_{search_key}." in left_side:
+            print(left_side)  # Output: Abc_09.link.com
