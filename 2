@@ -1,0 +1,19 @@
+# Define SPN credentials
+$clientId = "<your-client-id>"
+$clientSecret = "<your-client-secret>"
+$tenantId = "<your-tenant-id>"
+
+# Login using SPN
+az login --service-principal --username $clientId --password $clientSecret --tenant $tenantId --only-show-errors
+
+# Fetch all app registrations
+$apps = az ad app list --query "[].{Name:displayName}" --output json | ConvertFrom-Json
+
+# Filter apps that start with "AC Azure" or "AC AWS" (case-insensitive)
+$filteredApps = $apps | Where-Object { $_.Name -match "^(?i)AC Azure|AC AWS" }
+
+# Store the app names in a list
+$appNames = $filteredApps.Name
+
+# Output the list
+$appNames
