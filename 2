@@ -1,19 +1,23 @@
+data "azuread_app_role_assignment" "existing_assignments" {
+  for_each            = { for pair in setproduct(keys(data.azuread_group.groups), keys(data.azuread_service_principal.enterprise_apps)) : 
+                          "${pair[0]}-${pair[1]}" => pair }
+  principal_object_id = data.azuread_group.groups[each.value[0]].object_id
+  resource_object_id  = data.azuread_service_principal.enterprise_apps[each.value[1]].object_id
+}
+
 resource "azuread_app_role_assignment" "group_assignments" {
   for_each = {
     for pair in setproduct(keys(data.azuread_group.groups), keys(data.azuread_service_principal.enterprise_apps)) :
-    "${pair[0]}-${pair[1]}" => {
-      group_key = pair[0]
-      app_key = pair[1]
-      principal_object_id = data.azuread_group.groups[pair[0]].object_id
-      resource_object_id = data.azuread_service_principal.enterprise_apps[pair[1]].object_id
-      app_role_id = lookup(data.azuread_service_principal.enterprise_apps[pair[1]].app_roles[0], "id")
-    }
+    "${pair[0]}-${pair[1]}" => pair 
+    if !contains([for assignment in data.azuread_app_role_assignment.existing_assignments : assignment.app_role_id], 
+                 lookup(data.azuread_service_principal.enterprise_apps[each.value[1]].app_roles[0], "id"))
   }
 
-  # Only create if the assignment doesn't already exist
-  count = can(azuread_app_role_assignment.group_assignments[each.key]) ? 0 : 1
+  principal_object_id = data.azuread_group.groups[each.value[0]].object_id
+  resource_object_id  = data.azuread_service_principal.enterprise_apps[each.value[1]].object_id
+  app_role_id         = lookup(data.azuread_service_principal.enterprise_apps[each.value[1]].app_roles[0], "id")
 
-  principal_object_id = each.value.principal_object_id
-  resource_object_id = each.value.resource_object_id
-  app_role_id = each.value.app_role_id
-}
+  lifecycle {
+    ignore_changes = all
+    create_before_destroy = true
+  }
