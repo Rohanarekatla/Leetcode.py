@@ -1,5 +1,67 @@
-# Fetch app registrations with limited fields to optimize performance
-$apps = az ad app list --query "[?starts_with(displayName, 'AC Azure') || starts_with(displayName, 'AC AWS')].{Name:displayName}" --output json | ConvertFrom-Json
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.0"
+    }
+  }
+}
 
-# Output the filtered list
-$apps
+provider "azurerm" {
+  features {}
+}
+
+# Terraform variables for SPN credentials
+variable "client_id" {
+  description = "Azure AD Client ID"
+  type        = string
+}
+
+variable "client_secret" {
+  description = "Azure AD Client Secret"
+  type        = string
+  sensitive   = true
+}
+
+variable "tenant_id" {
+  description = "Azure AD Tenant ID"
+  type        = string
+}
+
+# Run PowerShell script inside Terraform
+resource "null_resource" "fetch_apps" {
+  provisioner "local-exec" {
+    command = <<EOT
+      $clientId = "${var.client_id}"
+      $clientSecret = "${var.client_secret}"
+      $tenantId = "${var.tenant_id}"
+
+      # Login using SPN
+      az login --service-principal --username $clientId --password $clientSecret --tenant $tenantId --only-show-errors
+
+      # Fetch filtered app registrations
+      $apps = az ad app list --query "[?starts_with(displayName, 'AC Azure') || starts_with(displayName, 'AC AWS')].{Name:displayName}" --output json | ConvertFrom-Json
+
+      # Save output to a file
+      $apps | ConvertTo-Json -Compress | Out-File apps.json
+    EOT
+    interpreter = ["powershell", "-Command"]
+  }
+}
+
+# Read the JSON file created by PowerShell
+data "local_file" "apps_json" {
+  depends_on = [null_resource.fetch_apps]
+  filename   = "apps.json"
+}
+
+# Parse JSON output and extract app names
+locals {
+  apps_data = jsondecode(data.local_file.apps_json.content)
+  app_names = [for app in local.apps_data : app.Name]
+}
+
+# Output the filtered app names
+output "app_names" {
+  value = local.app_names
+}
