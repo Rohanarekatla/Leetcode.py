@@ -1,59 +1,19 @@
-# ✅ Fetch Azure AD app names and roles dynamically using PowerShell
-data "external" "fetch_apps" {
-  program = ["powershell", "-Command", <<EOT
-    $clientId = "${var.client_id}"
-    $clientSecret = "${var.client_secret}"
-    $tenantId = "${var.tenant_id}"
-
-    az login --service-principal --username $clientId --password $clientSecret --tenant $tenantId --only-show-errors | Out-Null
-
-    $apps = az ad app list --all --query "[?starts_with(displayName, 'A Azure') || starts_with(displayName, 'A AWS')].{Name:displayName, AppId:appId}" --output json | ConvertFrom-Json
-
-    $appNames = ($apps | ForEach-Object { $_.Name }) -join ","
-    $appIds = ($apps | ForEach-Object { $_.AppId }) -join ","
-
-    @{"app_names" = "$appNames"; "app_ids" = "$appIds"} | ConvertTo-Json -Compress
-  EOT
-  ]
-}
-
-locals {
-  app_ids_list = split(",", data.external.fetch_apps.result.app_ids)
-
-  # ✅ Read group names from file
-  content_lines  = file(var.config_file)
-  filtered_lines = split("\n", local.content_lines)
-  group_names    = [for line in local.filtered_lines : trimspace(line) if trimspace(line) != ""]
-}
-
-# ✅ Fetch Azure AD groups
-data "azuread_group" "groups" {
-  for_each     = toset(local.group_names)
-  display_name = each.value
-}
-
-# ✅ Fetch Azure AD apps (as service principals)
-data "azuread_service_principal" "apps" {
-  for_each  = toset(local.app_ids_list)
-  object_id = each.value
-}
-
-# ✅ Assign ALL groups to EACH app (Only if NOT already assigned)
 resource "azuread_app_role_assignment" "group_assignments" {
   for_each = {
-    for pair in setproduct(keys(data.azuread_group.groups), keys(data.azuread_service_principal.apps)) :
+    for pair in setproduct(keys(data.azuread_group.groups), keys(data.azuread_service_principal.enterprise_apps)) :
     "${pair[0]}-${pair[1]}" => {
       group_key = pair[0]
-      app_key   = pair[1]
+      app_key = pair[1]
+      principal_object_id = data.azuread_group.groups[pair[0]].object_id
+      resource_object_id = data.azuread_service_principal.enterprise_apps[pair[1]].object_id
+      app_role_id = lookup(data.azuread_service_principal.enterprise_apps[pair[1]].app_roles[0], "id")
     }
   }
 
-  principal_object_id = data.azuread_group.groups[each.value.group_key].object_id
-  resource_object_id  = data.azuread_service_principal.apps[each.value.app_key].object_id
-  app_role_id         = data.azuread_service_principal.apps[each.value.app_key].app_roles[0].id
+  # Only create if the assignment doesn't already exist
+  count = can(azuread_app_role_assignment.group_assignments[each.key]) ? 0 : 1
 
-  lifecycle {
-    ignore_changes = all
-    create_before_destroy = true
-  }
+  principal_object_id = each.value.principal_object_id
+  resource_object_id = each.value.resource_object_id
+  app_role_id = each.value.app_role_id
 }
