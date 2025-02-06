@@ -1,0 +1,8 @@
+# Assign ALL groups to EACH app
+resource "azuread_app_role_assignment" "group_assignment" {
+  for_each = { for group in data.azuread_group.group : group.display_name => group }
+
+  principal_object_id = each.value.object_id  # Group Object ID
+  resource_object_id  = local.app_ids_list[0]  # Assign first App ID (Fix: use correct index)
+  app_role_id         = local.app_roles_list[0]  # First app role of the app
+}
