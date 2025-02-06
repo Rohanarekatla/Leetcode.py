@@ -1,9 +1,5 @@
-locals {
-  combined_assignments = {
-    for pair in setproduct(keys(data.azuread_group.groups), keys(data.azuread_service_principal.enterprise_apps)) :
-    "${pair[0]}-${pair[1]}" => {
-      group_key = pair[0]
-      app_key   = pair[1]
-    }
+provisioner "local-exec" {
+    command = <<EOT
+    az ad app role assignment create --assignee ${data.azuread_group.groups[each.value.group_key].object_id} --role ${data.azuread_service_principal.enterprise_apps[each.value.app_key].app_roles[0].id} --resource ${data.azuread_service_principal.enterprise_apps[each.value.app_key].object_id} --output none 2>/dev/null || echo 'Assignment already exists, skipping...'
+    EOT
   }
-}
