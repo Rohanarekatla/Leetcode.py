@@ -1,4 +1,3 @@
-# Fetch Azure AD apps using PowerShell
 data "external" "fetch_apps" {
   program = ["powershell", "-Command", <<EOT
     $clientId = "${var.client_id}"
@@ -14,57 +13,13 @@ data "external" "fetch_apps" {
     # Extract names, IDs, and first available role IDs
     $appNames = ($apps | ForEach-Object { $_.Name }) -join ","
     $appIds = ($apps | ForEach-Object { $_.AppId }) -join ","
-    $appRoles = ($apps | ForEach-Object { ($_?.Roles | Select-Object -First 1)?.id }) -join ","
+    
+    # Handle cases where there are no roles
+    $appRoles = ($apps | ForEach-Object { 
+        if ($_.Roles -and $_.Roles.Count -gt 0) { $_.Roles[0].id } else { "null" } 
+    }) -join ","
     
     @{"app_names" = "$appNames"; "app_ids" = "$appIds"; "app_roles" = "$appRoles"} | ConvertTo-Json -Compress
   EOT
   ]
-}
-
-# Convert the comma-separated output into lists
-locals {
-  app_names_list   = split(",", data.external.fetch_apps.result.app_names)
-  app_ids_list     = split(",", data.external.fetch_apps.result.app_ids)
-  app_roles_list   = split(",", data.external.fetch_apps.result.app_roles)
-
-  # Read group names from a file and remove empty lines
-  content_lines  = file(var.config_file)
-  filtered_lines = split("\n", local.content_lines)
-  group_names    = [for line in local.filtered_lines : trimspace(line) if trimspace(line) != ""]
-}
-
-# Fetch Azure AD groups based on group names
-data "azuread_group" "groups" {
-  for_each     = toset(local.group_names)
-  display_name = each.value
-}
-
-# Fetch Azure AD apps based on retrieved app IDs
-data "azuread_service_principal" "enterprise_apps" {
-  for_each = toset(local.app_ids_list)
-  object_id = each.value
-}
-
-# Assign ALL groups to EACH app
-resource "azuread_app_role_assignment" "group_assignments" {
-  for_each = {
-    for pair in setproduct(keys(data.azuread_group.groups), keys(data.azuread_service_principal.enterprise_apps)) :
-    "${pair[0]}-${pair[1]}" => {
-      group_key = pair[0]
-      app_key   = pair[1]
-    }
-  }
-
-  principal_object_id = data.azuread_group.groups[each.value.group_key].object_id
-  resource_object_id  = data.azuread_service_principal.enterprise_apps[each.value.app_key].object_id
-  app_role_id         = lookup(
-                          data.azuread_service_principal.enterprise_apps[each.value.app_key].app_roles[0], 
-                          "id", 
-                          null
-                        )
-
-  lifecycle {
-    ignore_changes = all
-    create_before_destroy = true
-  }
 }
