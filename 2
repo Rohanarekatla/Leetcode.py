@@ -1,5 +1,24 @@
-# Fetch Azure AD service principals (enterprise apps)
-data "azuread_service_principal" "enterprise_apps" {
-  for_each = { for id in local.app_ids_list : id => id if length(id) > 0 && id != "null" }
-  object_id = each.value
+data "azuread_app_role_assignment" "existing_assignments" {
+  for_each = {
+    for pair in setproduct(keys(data.azuread_group.groups), keys(data.azuread_service_principal.enterprise_apps)) :
+    "${pair[0]}-${pair[1]}" => {
+      group_key = pair[0]
+      app_key   = pair[1]
+    }
+  }
+
+  principal_object_id = data.azuread_group.groups[each.value.group_key].object_id
+  resource_object_id  = data.azuread_service_principal.enterprise_apps[each.value.app_key].object_id
+}
+
+
+resource "azuread_app_role_assignment" "group_assignments" {
+  for_each = {
+    for key, value in local.combined_assignments :
+    key => value if !contains(keys(data.azuread_app_role_assignment.existing_assignments), key)
+  }
+
+  principal_object_id = data.azuread_group.groups[each.value.group_key].object_id
+  resource_object_id  = data.azuread_service_principal.enterprise_apps[each.value.app_key].object_id
+  app_role_id         = data.azuread_service_principal.enterprise_apps[each.value.app_key].app_roles[0].id
 }
