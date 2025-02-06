@@ -1,8 +1,10 @@
+ Assign ALL groups to EACH app
 resource "azuread_app_role_assignment" "assign_all_groups_to_apps" {
-  for_each = { for pair in setproduct(local.app_ids_list, keys(data.azuread_group.groups)) :
-    "${pair[0]}_${pair[1]}" => { app_id = pair[0], group_key = pair[1] }
+  for_each = {
+    for pair in setproduct(data.azuread_applications.apps.object_ids, keys(data.azuread_groups.groups)) :
+    "${pair[0]}_${pair[1]}" => { app_id = pair[0], group_id = pair[1] }
   }
 
-  app_role_id        = each.value.app_id  # App ID
-  principal_object_id = data.azuread_group.groups[each.value.group_key].object_id  # Group ID
+  app_role_id        = each.value.app_id  # Assign app role
+  principal_object_id = data.azuread_groups.groups[each.value.group_id].object_id  # Group ID
 }
