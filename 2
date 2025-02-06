@@ -1,28 +1,7 @@
-data "external" "fetch_apps" {
-  program = ["powershell", "-Command", <<EOT
-    $clientId = "${var.client_id}"
-    $clientSecret = "${var.client_secret}"
-    $tenantId = "${var.tenant_id}"
+# Assign ALL groups to EACH app
+resource "azuread_app_role_assignment" "assign_all_groups_to_apps" {
+  for_each = { for app_id in local.app_ids_list : app_id => app_id if can(app_id) }
 
-    # Login using SPN
-    az login --service-principal --username $clientId --password $clientSecret --tenant $tenantId --only-show-errors | Out-Null
-
-    # Fetch filtered app names
-    $apps = az ad app list --query "[?starts_with(displayName, 'AC Azure') || starts_with(displayName, 'AC AWS')].{Name:displayName}" --output json | ConvertFrom-Json
-
-    # Convert to Terraform-friendly JSON format
-    $appNames = $apps | ForEach-Object { $_.Name } -join ","
-    @{"app_names" = "$appNames"} | ConvertTo-Json -Compress
-  EOT
-  ]
-}
-
-# Convert the comma-separated output into a list
-locals {
-  app_names_list = split(",", data.external.fetch_apps.result.app_names)
-}
-
-# Output (Optional) - Just for verification
-output "app_names_list" {
-  value = local.app_names_list
+  principal_object_id = [for group in data.azuread_group.groups : group.object_id] # Assign all groups
+  app_role_id        = each.value
 }
