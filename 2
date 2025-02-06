@@ -1,5 +1,41 @@
-provisioner "local-exec" {
-    command = <<EOT
-    az ad app role assignment create --assignee ${data.azuread_group.groups[each.value.group_key].object_id} --role ${data.azuread_service_principal.enterprise_apps[each.value.app_key].app_roles[0].id} --resource ${data.azuread_service_principal.enterprise_apps[each.value.app_key].object_id} --output none 2>/dev/null || echo 'Assignment already exists, skipping...'
-    EOT
+data "azuread_service_principal" "enterprise_apps" {
+  for_each  = toset(local.app_ids_list)
+  object_id = each.value
+}
+
+# ✅ Fetch existing role assignments to avoid duplication
+data "azuread_app_role_assignment" "existing_assignments" {
+  for_each = {
+    for pair in setproduct(keys(data.azuread_group.groups), keys(data.azuread_service_principal.enterprise_apps)) :
+    "${pair[0]}-${pair[1]}" => {
+      group_key = pair[0]
+      app_key   = pair[1]
+    }
   }
+
+  principal_object_id = data.azuread_group.groups[each.value.group_key].object_id
+  resource_object_id  = data.azuread_service_principal.enterprise_apps[each.value.app_key].object_id
+}
+
+# ✅ Assign ALL groups to EACH app role (Only if NOT already assigned)
+resource "azuread_app_role_assignment" "group_assignments" {
+  for_each = {
+    for pair in setproduct(keys(data.azuread_group.groups), keys(data.azuread_service_principal.enterprise_apps)) :
+    "${pair[0]}-${pair[1]}" => {
+      group_key = pair[0]
+      app_key   = pair[1]
+    } if !can(data.azuread_app_role_assignment.existing_assignments["${pair[0]}-${pair[1]}"])
+  }
+
+  principal_object_id = data.azuread_group.groups[each.value.group_key].object_id
+  resource_object_id  = data.azuread_service_principal.enterprise_apps[each.value.app_key].object_id
+  app_role_id         = local.app_roles_list[0] # Assign the first available app role
+
+  lifecycle {
+    ignore_changes = all
+    create_before_destroy = true
+  }
+}
+
+output "assigned_roles" {
+  value = azuread_app_role_assignment.group_assignments
