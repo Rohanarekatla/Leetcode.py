@@ -1,25 +1,5 @@
-data "external" "fetch_apps" {
-  program = ["powershell", "-Command", <<EOT
-    $clientId = "${var.client_id}"
-    $clientSecret = "${var.client_secret}"
-    $tenantId = "${var.tenant_id}"
-
-    # Login using SPN
-    az login --service-principal --username $clientId --password $clientSecret --tenant $tenantId --only-show-errors | Out-Null
-
-    # Fetch filtered app names, IDs, and roles
-    $apps = az ad app list --all --query "[?starts_with(displayName, 'A Azure') || starts_with(displayName, 'A AWS')].{Name:displayName, AppId:appId, Roles:appRoles}" --output json | ConvertFrom-Json
-
-    # Extract names, IDs, and first available role IDs
-    $appNames = ($apps | ForEach-Object { $_.Name }) -join ","
-    $appIds = ($apps | ForEach-Object { $_.AppId }) -join ","
-    
-    # Handle cases where there are no roles
-    $appRoles = ($apps | ForEach-Object { 
-        if ($_.Roles -and $_.Roles.Count -gt 0) { $_.Roles[0].id } else { "null" } 
-    }) -join ","
-    
-    @{"app_names" = "$appNames"; "app_ids" = "$appIds"; "app_roles" = "$appRoles"} | ConvertTo-Json -Compress
-  EOT
-  ]
+# Fetch Azure AD service principals (enterprise apps)
+data "azuread_service_principal" "enterprise_apps" {
+  for_each = { for id in local.app_ids_list : id => id if length(id) > 0 && id != "null" }
+  object_id = each.value
 }
