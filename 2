@@ -1,15 +1,92 @@
-resource "azuread_app_role_assignment" "group_assignments" {
-  for_each = {
-    for pair in setproduct(keys(data.azuread_group.groups), keys(data.azuread_service_principal.enterprise_apps)) :
-    "${pair[0]}-${pair[1]}" => pair
+# common/snowflake_auth/main.tf
+terraform {
+  required_providers {
+    snowflake = {
+      source  = "Snowflake-Labs/snowflake"
+      version = "~> 0.87"
+    }
   }
+}
 
-  principal_object_id = data.azuread_group.groups[each.value[0]].object_id
-  resource_object_id  = data.azuread_service_principal.enterprise_apps[each.value[1]].object_id
-  app_role_id         = lookup(data.azuread_service_principal.enterprise_apps[each.value[1]].app_roles[0], "id")
+# Generate RSA key pair for OAuth
+resource "tls_private_key" "snowflake_key" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
 
-  lifecycle {
-    ignore_changes = all
-    create_before_destroy = true
+# Store public key in local file
+resource "local_file" "public_key" {
+  content  = tls_private_key.snowflake_key.public_key_pem
+  filename = "${path.module}/snowflake_public_key.pem"
+}
+
+# Get OAuth token using curl
+data "external" "snowflake_oauth" {
+  program = ["bash", "-c", <<-EOT
+    response=$(curl -X POST \
+      "https://your-account.snowflakecomputing.com/oauth/token-request" \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      -d "grant_type=client_credentials" \
+      -d "client_id=$SNOWFLAKE_USER" \
+      -d "private_key=${base64encode(tls_private_key.snowflake_key.private_key_pem)}")
+    echo $response
+  EOT
+  ]
+}
+
+# Output provider configuration
+output "snowflake_provider" {
+  value = {
+    account    = var.snowflake_account
+    region     = var.snowflake_region
+    username   = var.snowflake_user
+    oauth_token = data.external.snowflake_oauth.result.access_token
   }
+  sensitive = true
+}
+
+# variables.tf
+variable "snowflake_account" {
+  type = string
+}
+
+variable "snowflake_region" {
+  type = string
+}
+
+variable "snowflake_user" {
+  type = string
+}
+
+# terragrunt.hcl (root level)
+generate "provider" {
+  path      = "provider.tf"
+  if_exists = "overwrite_terragrunt"
+  contents  = <<EOF
+provider "snowflake" {
+  account    = "${dependency.snowflake_auth.outputs.snowflake_provider.account}"
+  region     = "${dependency.snowflake_auth.outputs.snowflake_provider.region}"
+  username   = "${dependency.snowflake_auth.outputs.snowflake_provider.username}"
+  oauth_token = "${dependency.snowflake_auth.outputs.snowflake_provider.oauth_token}"
+}
+EOF
+}
+
+# Example project/terragrunt.hcl
+include "root" {
+  path = find_in_parent_folders()
+}
+
+dependency "snowflake_auth" {
+  config_path = "../common/snowflake_auth"
+}
+
+terraform {
+  source = "${get_parent_terragrunt_dir()}/modules//your-module"
+}
+
+# Example project/main.tf
+# Your Snowflake resources here
+resource "snowflake_database" "example" {
+  name = "example_database"
 }
