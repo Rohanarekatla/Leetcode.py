@@ -1,24 +1,20 @@
-remote_state {
-  backend = "azurerm"
-  config = {
-    resource_group_name  = "terraform-state-rg"
-    storage_account_name = "tfstateaccount"
-    container_name      = "tfstate"
-    key                = "${path_relative_to_include()}/terraform.tfstate"
-  }
+include "root" {
+  path = find_in_parent_folders()
 }
 
-generate "provider" {
-  path      = "provider.tf"
-  if_exists = "overwrite"
-  contents  = <<EOF
 terraform {
-  required_providers {
-    snowflake = {
-      source  = "Snowflake-Labs/snowflake"
-      version = "~> 0.68"
-    }
+  source = "${get_parent_terragrunt_dir()}/common/snowflake_auth"
+}
+
+locals {
+  config = yamldecode(file("common_vars.yaml"))
+}
+
+inputs = merge(
+  local.config,
+  {
+    tenant_id     = get_env("AZURE_TENANT_ID")
+    client_id     = get_env("AZURE_CLIENT_ID")
+    client_secret = get_env("AZURE_CLIENT_SECRET")
   }
-}
-EOF
-}
+)
