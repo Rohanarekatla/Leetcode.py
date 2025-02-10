@@ -1,20 +1,69 @@
-include "root" {
-  path = find_in_parent_folders()
+# common.hcl
+
+# Define input variables
+inputs = {
+  account          = "prd"           # Default value, override in environment-specific files
+  secondaryaccount = "secondary_prd" # Default value, override as needed
+  user             = "terraform_user"
+  role             = "TERRAFORM_ROLE"
+  client_id        = "your_client_id"
+  client_secret    = "your_client_secret"
+  scope            = "api://3a68e41c-ba02-4962-aac0-785a675cfad4/-default"
 }
 
-terraform {
-  source = "${get_parent_terragrunt_dir()}/common/snowflake_auth"
-}
+# Generate the Terraform code for Snowflake providers and token retrieval
+generate "snowflake_config" {
+  path      = "snowflake_providers.tf"
+  if_exists = "overwrite"
+  contents  = <<-EOF
+    variable "account" {}
+    variable "secondaryaccount" {}
+    variable "user" {}
+    variable "role" {}
+    variable "client_id" {}
+    variable "client_secret" {}
+    variable "scope" {}
 
-locals {
-  config = yamldecode(file("common_vars.yaml"))
-}
+    locals {
+      tenant_id = contains(["prd"], var.account) ? "xyz" : contains(["ppd"], var.account) ? "abc" : "snowflake"
+    }
 
-inputs = merge(
-  local.config,
-  {
-    tenant_id     = get_env("AZURE_TENANT_ID")
-    client_id     = get_env("AZURE_CLIENT_ID")
-    client_secret = get_env("AZURE_CLIENT_SECRET")
-  }
-)
+    # Retrieve OAuth token
+    data "http" "token_request" {
+      url    = "https://login.microsoftonline.com/${local.tenant_id}/oauth2/v2.0/token"
+      method = "POST"
+      request_headers = {
+        Content-Type = "application/x-www-form-urlencoded; charset=UTF-8"
+      }
+      request_body = "client_id=${var.client_id}&client_secret=${urlencode(var.client_secret)}&grant_type=client_credentials&scope=${urlencode(var.scope)}"
+    }
+
+    locals {
+      token_response = jsondecode(data.http.token_request.response_body)
+    }
+
+    # Primary Snowflake Provider
+    provider "snowflake" {
+      alias               = "primary"
+      account_name        = var.account
+      organization_name   = "STA"
+      user                = var.user
+      authenticator       = "OAuth"
+      role                = var.role
+      token               = local.token_response.access_token
+      preview_features_enabled = ["snowflake_failover_group_resource", "snowflake_current_account_datasource"]
+    }
+
+    # Secondary Snowflake Provider
+    provider "snowflake" {
+      alias               = "secondary"
+      account_name        = var.secondaryaccount
+      organization_name   = "STA"
+      user                = var.user
+      authenticator       = "OAuth"
+      role                = var.role
+      token               = local.token_response.access_token
+      preview_features_enabled = ["snowflake_failover_group_resource"]
+    }
+  EOF
+}
