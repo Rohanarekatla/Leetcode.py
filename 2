@@ -1,69 +1,108 @@
-# common.hcl
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
-# Define input variables
-inputs = {
-  account          = "prd"           # Default value, override in environment-specific files
-  secondaryaccount = "secondary_prd" # Default value, override as needed
-  user             = "terraform_user"
-  role             = "TERRAFORM_ROLE"
-  client_id        = "your_client_id"
-  client_secret    = "your_client_secret"
-  scope            = "api://3a68e41c-ba02-4962-aac0-785a675cfad4/-default"
-}
+# Step 1: Read the HTML file
+with open('output.out', 'r') as file:
+    html_content = file.read()
 
-# Generate the Terraform code for Snowflake providers and token retrieval
-generate "snowflake_config" {
-  path      = "snowflake_providers.tf"
-  if_exists = "overwrite"
-  contents  = <<-EOF
-    variable "account" {}
-    variable "secondaryaccount" {}
-    variable "user" {}
-    variable "role" {}
-    variable "client_id" {}
-    variable "client_secret" {}
-    variable "scope" {}
+# Step 2: Clean and format the HTML (example: wrap in a table if needed)
+# If the content is not already in a table, you can wrap it in one
+if "<table" not in html_content:
+    html_content = f"""
+    <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">{html_content}</td>
+        </tr>
+    </table>
+    """
 
-    locals {
-      tenant_id = contains(["prd"], var.account) ? "xyz" : contains(["ppd"], var.account) ? "abc" : "snowflake"
+# Step 3: Add professional styling
+css = """
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f9f9f9;
     }
-
-    # Retrieve OAuth token
-    data "http" "token_request" {
-      url    = "https://login.microsoftonline.com/${local.tenant_id}/oauth2/v2.0/token"
-      method = "POST"
-      request_headers = {
-        Content-Type = "application/x-www-form-urlencoded; charset=UTF-8"
-      }
-      request_body = "client_id=${var.client_id}&client_secret=${urlencode(var.client_secret)}&grant_type=client_credentials&scope=${urlencode(var.scope)}"
+    .container {
+        max-width: 100%;
+        overflow-x: auto;
     }
-
-    locals {
-      token_response = jsondecode(data.http.token_request.response_body)
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 20px;
     }
-
-    # Primary Snowflake Provider
-    provider "snowflake" {
-      alias               = "primary"
-      account_name        = var.account
-      organization_name   = "STA"
-      user                = var.user
-      authenticator       = "OAuth"
-      role                = var.role
-      token               = local.token_response.access_token
-      preview_features_enabled = ["snowflake_failover_group_resource", "snowflake_current_account_datasource"]
+    th, td {
+        padding: 12px;
+        text-align: left;
+        border: 1px solid #ddd;
     }
-
-    # Secondary Snowflake Provider
-    provider "snowflake" {
-      alias               = "secondary"
-      account_name        = var.secondaryaccount
-      organization_name   = "STA"
-      user                = var.user
-      authenticator       = "OAuth"
-      role                = var.role
-      token               = local.token_response.access_token
-      preview_features_enabled = ["snowflake_failover_group_resource"]
+    th {
+        background-color: #007bff;
+        color: white;
+        font-weight: bold;
     }
-  EOF
-}
+    tr:nth-child(even) {
+        background-color: #f2f2f2;
+    }
+    tr:hover {
+        background-color: #ddd;
+    }
+    @media (max-width: 600px) {
+        th, td {
+            padding: 8px;
+        }
+    }
+</style>
+"""
+
+# Wrap the HTML content with the CSS and a container
+formatted_html = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Professional Report</title>
+    {css}
+</head>
+<body>
+    <div class="container">
+        <h1>Professional Report</h1>
+        {html_content}
+    </div>
+</body>
+</html>
+"""
+
+# Step 4: Send the email
+def send_email(html_content):
+    # Email configuration
+    sender_email = "your_email@example.com"
+    receiver_email = "recipient@example.com"
+    password = "your_password"
+
+    # Create the email
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = receiver_email
+    msg['Subject'] = "Professional Report"
+
+    # Attach the HTML content
+    msg.attach(MIMEText(html_content, 'html'))
+
+    # Send the email
+    try:
+        with smtplib.SMTP('smtp.example.com', 587) as server:
+            server.starttls()
+            server.login(sender_email, password)
+            server.send_message(msg)
+        print("Email sent successfully!")
+    except Exception as e:
+        print(f"Error sending email: {e}")
+
+# Send the formatted HTML content
+send_email(formatted_html)
