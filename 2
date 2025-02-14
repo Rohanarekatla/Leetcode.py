@@ -2,12 +2,45 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-# Step 1: Read the HTML file
+# Step 1: Read the data from the .out file
 with open('output.out', 'r') as file:
-    html_content = file.read()
+    data = file.read().strip()
 
-# Step 2: Transform the landscape content
-# Wrap the content in a scrollable container and add professional styling
+# Step 2: Transform the data into a portrait format
+# Assuming the data is in a delimited format (e.g., CSV)
+# Example: "Column1,Column2,Column3\nValue1,Value2,Value3"
+rows = data.split('\n')
+headers = rows[0].split(',')  # First row is headers
+values = rows[1].split(',')   # Second row is values
+
+# Create a portrait format table
+portrait_data = list(zip(headers, values))  # Pair headers with values
+
+# Step 3: Create an HTML table
+html_table = """
+<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+    <thead>
+        <tr>
+            <th style="padding: 12px; border: 1px solid #ddd; background-color: #007bff; color: white; text-align: left;">Field</th>
+            <th style="padding: 12px; border: 1px solid #ddd; background-color: #007bff; color: white; text-align: left;">Value</th>
+        </tr>
+    </thead>
+    <tbody>
+"""
+# Add rows to the table
+for field, value in portrait_data:
+    html_table += f"""
+    <tr>
+        <td style="padding: 12px; border: 1px solid #ddd; text-align: left; background-color: #f2f2f2;"><strong>{field}</strong></td>
+        <td style="padding: 12px; border: 1px solid #ddd; text-align: left;">{value}</td>
+    </tr>
+    """
+html_table += """
+    </tbody>
+</table>
+"""
+
+# Step 4: Add professional styling and wrap in a container
 css = """
 <style>
     body {
@@ -20,36 +53,13 @@ css = """
         max-width: 100%;
         overflow-x: auto;
     }
-    table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-bottom: 20px;
-    }
-    th, td {
-        padding: 12px;
-        text-align: left;
-        border: 1px solid #ddd;
-    }
-    th {
-        background-color: #007bff;
-        color: white;
-        font-weight: bold;
-    }
-    tr:nth-child(even) {
-        background-color: #f2f2f2;
-    }
-    tr:hover {
-        background-color: #ddd;
-    }
-    @media (max-width: 600px) {
-        th, td {
-            padding: 8px;
-        }
+    h1 {
+        color: #333;
     }
 </style>
 """
 
-# Wrap the HTML content in a scrollable container
+# Wrap the HTML table with the CSS and a container
 formatted_html = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -62,15 +72,13 @@ formatted_html = f"""
 <body>
     <div class="container">
         <h1>Professional Report</h1>
-        <div style="overflow-x: auto;">
-            {html_content}
-        </div>
+        {html_table}
     </div>
 </body>
 </html>
 """
 
-# Step 3: Send the email
+# Step 5: Send the email
 def send_email(html_content):
     # Email configuration
     sender_email = "your_email@example.com"
