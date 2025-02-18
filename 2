@@ -1,108 +1,76 @@
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import textwrap  # To wrap text to a fixed width
 
-# Step 1: Read the data from the .out file
-with open('output.out', 'r') as file:
-    data = file.read().strip()
+# SMTP Server Configuration
+SMTP_SERVER = "smtp.yourmailserver.com"  # Replace with your SMTP server
+SMTP_PORT = 587  # Common SMTP port for TLS
+SMTP_USERNAME = "your_email@example.com"  # Replace with your email
+SMTP_PASSWORD = "your_password"  # Replace with your password
 
-# Step 2: Transform the data into a portrait format
-# Assuming the data is in a delimited format (e.g., CSV)
-# Example: "Column1,Column2,Column3\nValue1,Value2,Value3"
-rows = data.split('\n')
-headers = rows[0].split(',')  # First row is headers
-values = rows[1].split(',')   # Second row is values
+# Sender and Receiver Details
+sender_email = "your_email@example.com"
+receiver_email = "recipient@example.com"
 
-# Create a portrait format table
-portrait_data = list(zip(headers, values))  # Pair headers with values
+# Read the .out file content
+file_path = "output.out"  # Replace with actual file path
+with open(file_path, "r") as file:
+    file_content = file.read()
 
-# Step 3: Create an HTML table
-html_table = """
-<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-    <thead>
-        <tr>
-            <th style="padding: 12px; border: 1px solid #ddd; background-color: #007bff; color: white; text-align: left;">Field</th>
-            <th style="padding: 12px; border: 1px solid #ddd; background-color: #007bff; color: white; text-align: left;">Value</th>
-        </tr>
-    </thead>
-    <tbody>
-"""
-# Add rows to the table
-for field, value in portrait_data:
-    html_table += f"""
-    <tr>
-        <td style="padding: 12px; border: 1px solid #ddd; text-align: left; background-color: #f2f2f2;"><strong>{field}</strong></td>
-        <td style="padding: 12px; border: 1px solid #ddd; text-align: left;">{value}</td>
-    </tr>
-    """
-html_table += """
-    </tbody>
-</table>
-"""
+# Wrap text to 80 characters per line for better readability
+wrapped_content = "\n".join(textwrap.wrap(file_content, width=80))
 
-# Step 4: Add professional styling and wrap in a container
-css = """
-<style>
-    body {
-        font-family: Arial, sans-serif;
-        margin: 0;
-        padding: 20px;
-        background-color: #f9f9f9;
-    }
-    .container {
-        max-width: 100%;
-        overflow-x: auto;
-    }
-    h1 {
-        color: #333;
-    }
-</style>
-"""
+# Create Email Message
+message = MIMEMultipart()
+message["From"] = sender_email
+message["To"] = receiver_email
+message["Subject"] = ""
 
-# Wrap the HTML table with the CSS and a container
-formatted_html = f"""
-<!DOCTYPE html>
-<html lang="en">
+# Email Body (Formatted for Readability in Outlook)
+email_body = f"""
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Professional Report</title>
-    {css}
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+        }}
+        table {{
+            width: 100%;
+            max-width: 600px;
+            border-collapse: collapse;
+        }}
+        td {{
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            background-color: #f4f4f4;
+            padding: 10px;
+            border: 1px solid #ccc;
+        }}
+    </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Professional Report</h1>
-        {html_table}
-    </div>
+    <p>Dear Team,</p>
+    <p>Please find below the Snowflake account details extracted from the system:</p>
+    <table>
+        <tr><td>{wrapped_content.replace("\n", "<br>")}</td></tr>
+    </table>
+    <p>If you have any questions, please let me know.</p>
+    <p>Best regards,<br>Your Name<br>Your Position<br>Your Company</p>
 </body>
 </html>
 """
 
-# Step 5: Send the email
-def send_email(html_content):
-    # Email configuration
-    sender_email = "your_email@example.com"
-    receiver_email = "recipient@example.com"
-    password = "your_password"
+# Attach Email Body
+message.attach(MIMEText(email_body, "html"))
 
-    # Create the email
-    msg = MIMEMultipart()
-    msg['From'] = sender_email
-    msg['To'] = receiver_email
-    msg['Subject'] = "Professional Report"
-
-    # Attach the HTML content
-    msg.attach(MIMEText(html_content, 'html'))
-
-    # Send the email
-    try:
-        with smtplib.SMTP('smtp.example.com', 587) as server:
-            server.starttls()
-            server.login(sender_email, password)
-            server.send_message(msg)
-        print("Email sent successfully!")
-    except Exception as e:
-        print(f"Error sending email: {e}")
-
-# Send the formatted HTML content
-send_email(formatted_html)
+# Send Email
+try:
+    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+        server.starttls()  # Secure connection
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        server.sendmail(sender_email, receiver_email, message.as_string())
+    print("Email sent successfully!")
+except Exception as e:
+    print(f"Failed to send email: {e}")
