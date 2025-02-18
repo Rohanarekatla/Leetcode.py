@@ -1,25 +1,18 @@
 import json
 
-def convert_mapping_to_json(file_path):
-    result = {}
-    current_section = None
+def load_all_mappings(file_path):
+    """Loads all mappings from a JSON file."""
+    with open(file_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-    with open(file_path, 'r') as file:
-        for line in file:
-            line = line.strip()
-            
-            # Check for section headers
-            if line.startswith('[') and line.endswith(']'):
-                current_section = line[1:-1]
-                result[current_section] = {}
-            
-            # Process key-value pairs
-            elif ':' in line and current_section is not None:
-                key, value = line.split(':', 1)
-                result[current_section][key.strip()] = value.strip()
-
-    return json.dumps(result, indent=4)
-
-# Usage example
-json_output = convert_mapping_to_json('mapping.txt')
-print(json_output)
+def mappingfun(file_path, locationnum, selected_mapping):
+    """Fetches the mapping for a specific location number from a selected mapping."""
+    all_mappings = load_all_mappings(file_path)
+    
+    if selected_mapping in all_mappings:
+        bidirectional_mapping_all = all_mappings[selected_mapping]
+        
+        if locationnum in bidirectional_mapping_all:
+            return bidirectional_mapping_all[locationnum]
+    
+    return None  # Return None if no mapping is found
