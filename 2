@@ -1,18 +1,14 @@
-import json
+if tenantid == "p1":
+    with open(mapping_file, "r", encoding="utf-8") as file:
+        for line in file:
+            parts = line.split(":")
+            if len(parts) < 2:
+                continue  # Skip malformed lines
 
-def load_all_mappings(file_path):
-    """Loads all mappings from a JSON file."""
-    with open(file_path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def mappingfun(file_path, locationnum, selected_mapping):
-    """Fetches the mapping for a specific location number from a selected mapping."""
-    all_mappings = load_all_mappings(file_path)
-    
-    if selected_mapping in all_mappings:
-        bidirectional_mapping_all = all_mappings[selected_mapping]
-        
-        if locationnum in bidirectional_mapping_all:
-            return bidirectional_mapping_all[locationnum]
-    
-    return None  # Return None if no mapping is found
+            left_side = parts[0].strip()
+            if f"_{search_key}_" in left_side:
+                link = parts[1].strip()
+                
+                match = re.search(r'_(\d+)\.', link)
+                if match:
+                    drlocationsa = match.group(1)
