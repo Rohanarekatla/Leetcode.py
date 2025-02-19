@@ -1,14 +1,4 @@
-if tenantid == "p1":
-    with open(mapping_file, "r", encoding="utf-8") as file:
-        for line in file:
-            parts = line.split(":")
-            if len(parts) < 2:
-                continue  # Skip malformed lines
-
-            left_side = parts[0].strip()
-            if f"_{search_key}_" in left_side:
-                link = parts[1].strip()
-                
-                match = re.search(r'_(\d+)\.', link)
-                if match:
-                    drlocationsa = match.group(1)
+data "external" "wait_5_seconds" {
+  program = ["powershell", "-Command", "Start-Sleep -Seconds 5; @{status='done'} | ConvertTo-Json"]
+  depends_on = [snowflake_failover_group.primary]
+}
