@@ -1,4 +1,0 @@
-data "external" "wait_5_seconds" {
-  program = ["powershell", "-Command", "Start-Sleep -Seconds 5; @{status='done'} | ConvertTo-Json"]
-  depends_on = [snowflake_failover_group.primary]
-}
