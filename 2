@@ -1,74 +1,84 @@
-# Fetch enterprise applications
+# Fetch list of enterprise apps (AD AWS/AD Azure)
 data "external" "fetch_apps" {
   program = ["powershell", "-Command", <<EOT
   $clientId = "${var.client_id}"
   $clientSecret = "${var.client_secret}"
   $tenantId = "${var.tenant_id}"
 
-  az login --service-principal --username $clientId --password $clientSecret --tenant $tenantId --only-show-errors | Out-Null
-  $apps = az ad app list --all --query "[?starts_with(displayName, 'AD Azure') || starts_with(displayName, 'AD AWS')].{Name:displayName}" --output json
-  $appNames = ($apps | ForEach-Object { $_.Name }) -join ","
+  az login --service-principal -u $clientId -p $clientSecret --tenant $tenantId --only-show-errors | Out-Null
+  $apps = az ad app list --all --query "[?starts_with(displayName, 'AD Azure') || starts_with(displayName, 'AD AWS')].displayName" -o json
+  $appNames = ($apps | ConvertFrom-Json) -join ","
   @{ "app_names" = "$appNames" } | ConvertTo-Json -Compress
   EOT
   ]
 }
 
-# Read groups from the input file
+# Get groups from input file
 locals {
   app_names_list = split(",", data.external.fetch_apps.result.app_names)
-  content        = file(var.config_file)
-  lines          = split("\n", local.content)
-  filtered_lines = [for line in local.lines : line if trimspace(line) != ""]
-  group_names    = [for line in local.filtered_lines : trimspace(replace(replace(line, " read", ""), " write", ""))]
+  group_names    = [for line in split("\n", file(var.config_file)) : trimspace(line) if trimspace(line) != ""]
 }
 
-# Fetch Azure AD groups
+# Fetch Azure AD group objects
 data "azuread_group" "groups" {
   for_each     = toset(local.group_names)
   display_name = each.value
 }
 
-# Fetch enterprise applications
+# Fetch enterprise app objects
 data "azuread_service_principal" "enterprise_apps" {
   for_each     = toset(local.app_names_list)
   display_name = each.value
 }
 
-# Fetch existing app role assignments for each enterprise application
-data "azuread_app_role_assignments" "existing_assignments" {
+# Get existing assignments using PowerShell
+data "external" "existing_assignments" {
   for_each = data.azuread_service_principal.enterprise_apps
 
-  service_principal_id = each.value.object_id
+  program = ["powershell", "-Command", <<EOT
+  $clientId = "${var.client_id}"
+  $clientSecret = "${var.client_secret}"
+  $tenantId = "${var.tenant_id}"
+  $appId = "${each.value.application_id}"
+
+  az login --service-principal -u $clientId -p $clientSecret --tenant $tenantId --only-show-errors | Out-Null
+  $assignments = az ad app permission list --id $appId --query "oauth2PermissionScopes[].userConsentDisplayName" -o json
+  @{ "existing_groups" = ($assignments | ConvertFrom-Json) -join "," } | ConvertTo-Json
+  EOT
+  ]
 }
 
-# Filter out groups that are already assigned to each enterprise application
+# Calculate groups to assign
 locals {
   groups_to_assign = {
-    for app_name, app_data in data.azuread_service_principal.enterprise_apps : app_name => {
-      app_object_id = app_data.object_id
+    for app_name, app in data.azuread_service_principal.enterprise_apps : app_name => {
       groups = [
-        for group_name in local.group_names : group_name
+        for group in local.group_names : group
         if !contains(
-          [for assignment in data.azuread_app_role_assignments.existing_assignments[app_name].app_role_assignments : assignment.principal_display_name],
-          group_name
+          split(",", data.external.existing_assignments[app_name].result.existing_groups),
+          group
         )
       ]
     }
   }
 }
 
-# Assign roles to the filtered groups
-resource "azuread_app_role_assignment" "group_assignments" {
+# Create role assignments only for new groups
+resource "azuread_app_role_assignment" "safe_assignments" {
   for_each = {
-    for pair in setproduct(keys(data.azuread_group.groups), keys(data.azuread_service_principal.enterprise_apps)) : "${pair[0]}-${pair[1]}" => pair
+    for pair in setproduct(local.group_names, local.app_names_list) : 
+    "${pair[0]}-${pair[1]}" => {
+      group = pair[0],
+      app   = pair[1]
+    } 
     if contains(local.groups_to_assign[pair[1]].groups, pair[0])
   }
 
-  principal_object_id  = data.azuread_group.groups[each.value[0]].object_id
-  resource_object_id   = data.azuread_service_principal.enterprise_apps[each.value[1]].object_id
-  app_role_id          = lookup(data.azuread_service_principal.enterprise_apps[each.value[1]].app_roles[0], "id")
+  principal_object_id  = data.azuread_group.groups[each.value.group].object_id
+  resource_object_id   = data.azuread_service_principal.enterprise_apps[each.value.app].object_id
+  app_role_id          = data.azuread_service_principal.enterprise_apps[each.value.app].app_roles[0].id
 
   lifecycle {
-    ignore_changes          = all
-    create_before_destroy   = true
+    prevent_destroy = true
   }
+}
