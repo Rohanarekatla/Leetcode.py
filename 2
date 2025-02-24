@@ -30,8 +30,8 @@ data "azuread_service_principal" "enterprise_apps" {
   display_name = each.value
 }
 
-# Fetch existing group assignments for each enterprise app
-data "azuread_app_role_assignments" "existing_assignments" {
+# Fetch existing group assignments for each enterprise app using `azuread_service_principal_oauth2_permissions`
+data "azuread_service_principal_oauth2_permissions" "existing_assignments" {
   for_each = data.azuread_service_principal.enterprise_apps
 
   service_principal_id = each.value.object_id
@@ -45,7 +45,7 @@ locals {
       groups = [
         for group_name in local.group_names : group_name
         if !contains(
-          [for assignment in data.azuread_app_role_assignments.existing_assignments[app_name].app_role_assignments : assignment.principal_display_name],
+          [for assignment in data.azuread_service_principal_oauth2_permissions.existing_assignments[app_name].oauth2_permissions : assignment.principal_display_name],
           group_name
         )
       ]
