@@ -1,21 +1,71 @@
-# Ensure we get a clean list of existing groups from external data
+# Fetch list of enterprise apps (AD AWS/AD Azure)
+data "external" "fetch_apps" {
+  program = ["powershell", "-Command", <<EOT
+  $clientId = "${var.client_id}"
+  $clientSecret = "${var.client_secret}"
+  $tenantId = "${var.tenant_id}"
+
+  az login --service-principal -u $clientId -p $clientSecret --tenant $tenantId --only-show-errors | Out-Null
+  $apps = az ad app list --all --query "[?starts_with(displayName, 'AD Azure') || starts_with(displayName, 'AD AWS')].displayName" -o json
+  $appNames = ($apps | ConvertFrom-Json) -join ","
+  @{ "app_names" = "$appNames" } | ConvertTo-Json -Compress
+  EOT
+  ]
+}
+
+# Get groups from input file
+locals {
+  app_names_list = split(",", data.external.fetch_apps.result.app_names)
+  group_names    = [for line in split("\n", file(var.config_file)) : trimspace(line) if trimspace(line) != ""]
+}
+
+# Fetch Azure AD group objects
+data "azuread_group" "groups" {
+  for_each     = toset(local.group_names)
+  display_name = each.value
+}
+
+# Fetch enterprise app objects
+data "azuread_service_principal" "enterprise_apps" {
+  for_each     = toset(local.app_names_list)
+  display_name = each.value
+}
+
+# Get existing role assignments using PowerShell
+data "external" "existing_assignments" {
+  for_each = data.azuread_service_principal.enterprise_apps
+
+  program = ["powershell", "-Command", <<EOT
+  $clientId = "${var.client_id}"
+  $clientSecret = "${var.client_secret}"
+  $tenantId = "${var.tenant_id}"
+  $appObjectId = "${each.value.object_id}"
+
+  az login --service-principal -u $clientId -p $clientSecret --tenant $tenantId --only-show-errors | Out-Null
+  $assignments = az ad app permission list --id $appObjectId --query "oauth2PermissionScopes[].userConsentDisplayName" -o json
+  @{ "existing_groups" = ($assignments | ConvertFrom-Json) -join "," } | ConvertTo-Json -Compress
+  EOT
+  ]
+}
+
+# Extract and filter groups to be assigned
 locals {
   existing_assignments = {
     for app_name, app in data.azuread_service_principal.enterprise_apps :
-    app_name => split(",", lookup(data.external.existing_assignments[app_name].result, "existing_groups", ""))
+    app_name => toset(split(",", lookup(data.external.existing_assignments[app_name].result, "existing_groups", "")))
   }
 
   groups_to_assign = {
     for app_name, app in data.azuread_service_principal.enterprise_apps : app_name => {
       groups = [
         for group in local.group_names : group
-        if !contains(local.existing_assignments[app_name], group) # Only assign if not already present
+        if !(group in local.existing_assignments[app_name]) # Only assign missing groups
       ]
     }
   }
 }
 
-# Create role assignments only for new groups
+# Assign new role permissions to groups (skip existing ones)
 resource "azuread_app_role_assignment" "safe_assignments" {
   for_each = {
     for pair in setproduct(local.group_names, local.app_names_list) : 
