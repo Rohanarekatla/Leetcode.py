@@ -1,3 +1,4 @@
+# Fetch enterprise applications
 data "external" "fetch_apps" {
   program = ["powershell", "-Command", <<EOT
   $clientId = "${var.client_id}"
@@ -12,6 +13,7 @@ data "external" "fetch_apps" {
   ]
 }
 
+# Read groups from the input file
 locals {
   app_names_list = split(",", data.external.fetch_apps.result.app_names)
   content        = file(var.config_file)
@@ -20,24 +22,26 @@ locals {
   group_names    = [for line in local.filtered_lines : trimspace(replace(replace(line, " read", ""), " write", ""))]
 }
 
+# Fetch Azure AD groups
 data "azuread_group" "groups" {
   for_each     = toset(local.group_names)
   display_name = each.value
 }
 
+# Fetch enterprise applications
 data "azuread_service_principal" "enterprise_apps" {
   for_each     = toset(local.app_names_list)
   display_name = each.value
 }
 
-# Fetch existing group assignments for each enterprise app using `azuread_service_principal_oauth2_permissions`
-data "azuread_service_principal_oauth2_permissions" "existing_assignments" {
+# Fetch existing app role assignments for each enterprise application
+data "azuread_app_role_assignments" "existing_assignments" {
   for_each = data.azuread_service_principal.enterprise_apps
 
   service_principal_id = each.value.object_id
 }
 
-# Filter out groups that are already assigned to each enterprise app
+# Filter out groups that are already assigned to each enterprise application
 locals {
   groups_to_assign = {
     for app_name, app_data in data.azuread_service_principal.enterprise_apps : app_name => {
@@ -45,7 +49,7 @@ locals {
       groups = [
         for group_name in local.group_names : group_name
         if !contains(
-          [for assignment in data.azuread_service_principal_oauth2_permissions.existing_assignments[app_name].oauth2_permissions : assignment.principal_display_name],
+          [for assignment in data.azuread_app_role_assignments.existing_assignments[app_name].app_role_assignments : assignment.principal_display_name],
           group_name
         )
       ]
