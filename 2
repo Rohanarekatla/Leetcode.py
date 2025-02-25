@@ -1,4 +1,4 @@
-# Fetch list of enterprise apps (AD AWS/AD Azure)
+# Fetch enterprise apps (AD AWS/AD Azure)
 data "external" "fetch_apps" {
   program = ["powershell", "-Command", <<EOT
   $clientId = "${var.client_id}"
@@ -16,22 +16,22 @@ data "external" "fetch_apps" {
 # Get groups from input file
 locals {
   app_names_list = split(",", data.external.fetch_apps.result.app_names)
-  group_names    = [for line in split("\n", file(var.config_file)) : trimspace(line) if trimspace(line) != ""]
+  group_names    = compact([for line in split("\n", file(var.config_file)) : trimspace(line)])
 }
 
-# Fetch Azure AD group objects
+# Fetch Azure AD groups
 data "azuread_group" "groups" {
   for_each     = toset(local.group_names)
   display_name = each.value
 }
 
-# Fetch enterprise app objects
+# Fetch enterprise apps as service principals
 data "azuread_service_principal" "enterprise_apps" {
   for_each     = toset(local.app_names_list)
   display_name = each.value
 }
 
-# Get existing role assignments using PowerShell
+# Get existing assignments using Microsoft Graph API
 data "external" "existing_assignments" {
   for_each = data.azuread_service_principal.enterprise_apps
 
@@ -39,33 +39,32 @@ data "external" "existing_assignments" {
   $clientId = "${var.client_id}"
   $clientSecret = "${var.client_secret}"
   $tenantId = "${var.tenant_id}"
-  $appObjectId = "${each.value.object_id}"
+  $spId = "${each.value.object_id}"
 
   az login --service-principal -u $clientId -p $clientSecret --tenant $tenantId --only-show-errors | Out-Null
-  $assignments = az ad app permission list --id $appObjectId --query "oauth2PermissionScopes[].userConsentDisplayName" -o json
-  @{ "existing_groups" = ($assignments | ConvertFrom-Json) -join "," } | ConvertTo-Json -Compress
+  $assignments = az rest --method GET --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$spId/appRoleAssignedTo" | ConvertFrom-Json
+  $groupNames = $assignments.value | Where-Object { $_.principalType -eq "Group" } | Select-Object -ExpandProperty principalDisplayName
+  @{ "existing_groups" = ($groupNames -join ",") } | ConvertTo-Json
   EOT
   ]
 }
 
-# Extract and filter groups to be assigned
+# Calculate groups to assign
 locals {
-  existing_assignments = {
-    for app_name, app in data.azuread_service_principal.enterprise_apps :
-    app_name => toset(split(",", lookup(data.external.existing_assignments[app_name].result, "existing_groups", "")))
-  }
-
   groups_to_assign = {
     for app_name, app in data.azuread_service_principal.enterprise_apps : app_name => {
       groups = [
         for group in local.group_names : group
-        if !(group in local.existing_assignments[app_name]) # Only assign missing groups
+        if !contains(
+          split(",", data.external.existing_assignments[app_name].result.existing_groups),
+          group
+        )
       ]
     }
   }
 }
 
-# Assign new role permissions to groups (skip existing ones)
+# Create role assignments only for new groups
 resource "azuread_app_role_assignment" "safe_assignments" {
   for_each = {
     for pair in setproduct(local.group_names, local.app_names_list) : 
@@ -81,6 +80,6 @@ resource "azuread_app_role_assignment" "safe_assignments" {
   app_role_id          = data.azuread_service_principal.enterprise_apps[each.value.app].app_roles[0].id
 
   lifecycle {
-    prevent_destroy = true
+    ignore_changes = [principal_object_id, resource_object_id, app_role_id]
   }
 }
