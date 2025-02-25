@@ -1,4 +1,3 @@
-# Fetch enterprise apps (AD AWS/AD Azure)
 data "external" "fetch_apps" {
   program = ["powershell", "-Command", <<EOT
   $clientId = "${var.client_id}"
