@@ -43,22 +43,45 @@ data "external" "existing_assignments" {
 
   az login --service-principal -u $clientId -p $clientSecret --tenant $tenantId --only-show-errors | Out-Null
   $assignments = az rest --method GET --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$spId/appRoleAssignedTo" | ConvertFrom-Json
-  $groupNames = $assignments.value | Where-Object { $_.principalType -eq "Group" } | Select-Object -ExpandProperty principalDisplayName
-  @{ "existing_groups" = ($groupNames -join ",") } | ConvertTo-Json
+  
+  # Get group names and their object IDs
+  $groupInfo = $assignments.value | Where-Object { $_.principalType -eq "Group" } | ForEach-Object {
+    [PSCustomObject]@{
+      displayName = $_.principalDisplayName
+      objectId = $_.principalId
+    }
+  }
+  
+  # Convert to JSON
+  $result = @{
+    "existing_group_info" = if ($groupInfo) { $groupInfo | ConvertTo-Json -Compress } else { "[]" }
+  }
+  
+  $result | ConvertTo-Json -Compress
   EOT
   ]
 }
 
-# Calculate groups to assign
+# Parse existing assignments
 locals {
+  # Parse the JSON response for existing assignments
+  existing_assignments = {
+    for app_name, result in data.external.existing_assignments : app_name => 
+      jsondecode(result.result.existing_group_info)
+  }
+  
+  # Extract just the display names for easier comparison
+  existing_group_names = {
+    for app_name, groups in local.existing_assignments : app_name => 
+      [for group in groups : group.displayName]
+  }
+  
+  # Calculate groups to assign
   groups_to_assign = {
     for app_name, app in data.azuread_service_principal.enterprise_apps : app_name => {
       groups = [
         for group in local.group_names : group
-        if !contains(
-          split(",", data.external.existing_assignments[app_name].result.existing_groups),
-          group
-        )
+        if !contains(lookup(local.existing_group_names, app_name, []), group)
       ]
     }
   }
