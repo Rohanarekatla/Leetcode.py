@@ -105,8 +105,29 @@ def get_group_id(group_name, token):
     
     return response['value'][0]['id']
 
+def get_existing_app_role_assignments(group_id, token):
+    """Get all existing app role assignments for a group."""
+    endpoint = f'groups/{group_id}/appRoleAssignments'
+    return make_graph_request(endpoint, token)
+
+def check_if_assignment_exists(group_id, role_id, resource_id, token):
+    """Check if the specific app role assignment already exists."""
+    assignments = get_existing_app_role_assignments(group_id, token).get('value', [])
+    
+    for assignment in assignments:
+        if (assignment.get('appRoleId') == role_id and 
+            assignment.get('resourceId') == resource_id):
+            return True
+    
+    return False
+
 def create_app_role_assignment(group_id, role_id, resource_id, token):
-    """Create an app role assignment for a group."""
+    """Create an app role assignment for a group if it doesn't already exist."""
+    # First check if assignment already exists
+    if check_if_assignment_exists(group_id, role_id, resource_id, token):
+        print("  - Assignment already exists, skipping.")
+        return {"status": "skipped", "message": "Assignment already exists"}
+    
     endpoint = f'groups/{group_id}/appRoleAssignments'
     
     data = {
@@ -118,7 +139,7 @@ def create_app_role_assignment(group_id, role_id, resource_id, token):
     try:
         return make_graph_request(endpoint, token, method='POST', data=data)
     except Exception as e:
-        print(f"Error creating role assignment: {e}")
+        print(f"  - Error creating role assignment: {e}")
         return None
 
 def main():
@@ -182,13 +203,16 @@ def main():
         first_role_id = app_roles[0]['id']
         
         for group_name, group_id in group_ids.items():
-            print(f"Assigning {app_name} role to {group_name}")
+            print(f"Processing {app_name} role for {group_name}...")
             result = create_app_role_assignment(group_id, first_role_id, sp_id, token)
             
             if result:
-                print(f"Successfully assigned role for {app_name} to {group_name}")
+                if result.get("status") == "skipped":
+                    print(f"  - Skipped: Role assignment already exists for {app_name} to {group_name}")
+                else:
+                    print(f"  - Success: Role assigned for {app_name} to {group_name}")
             else:
-                print(f"Failed to assign role for {app_name} to {group_name}")
+                print(f"  - Failed: Could not assign role for {app_name} to {group_name}")
 
 if __name__ == "__main__":
     main()
