@@ -87,8 +87,8 @@ def get_service_principals(token):
                     # We need to get more details for each ADP Azure app
                     app_details = make_graph_request(f"servicePrincipals/{app['id']}", token)
                     
-                    # Check if homepage URL is https://www.snowflake.com/
-                    if 'homepage' in app_details and app_details['homepage'] == 'https://www.snowflake.com/':
+                    # Check if homepage URL contains www.snowflake.com as a substring
+                    if 'homepage' in app_details and 'www.snowflake.com' in app_details['homepage']:
                         print(f"Found matching app with Snowflake homepage: {app['displayName']}")
                         apps.append(app)
                         # Stop processing after finding the first match
