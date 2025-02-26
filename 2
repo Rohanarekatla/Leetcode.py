@@ -61,7 +61,7 @@ def make_graph_request(endpoint, token, method='GET', data=None, params=None):
         sys.exit(1)
 
 def get_service_principals(token):
-    """Get service principals that start with 'ADP Azure' or 'ADP AWS' and check for homepage URL."""
+    """Get service principals that start with 'ADP Azure' or 'ADP AWS' and have Snowflake homepage."""
     apps = []
     next_link = 'servicePrincipals'
     
@@ -81,28 +81,16 @@ def get_service_principals(token):
         response = make_graph_request(next_link, token, params=params)
         
         if 'value' in response:
-            # For ADP Azure apps, check if they have the Snowflake homepage URL
+            # Process each app to check for Snowflake homepage
             for app in response['value']:
-                if app['displayName'].startswith('ADP Azure'):
-                    # We need to get more details for each ADP Azure app
+                if app['displayName'].startswith('ADP Azure') or app['displayName'].startswith('ADP AWS'):
+                    # Get more details for each app
                     app_details = make_graph_request(f"servicePrincipals/{app['id']}", token)
                     
                     # Check if homepage URL contains www.snowflake.com as a substring
                     if 'homepage' in app_details and 'www.snowflake.com' in app_details['homepage']:
                         print(f"Found matching app with Snowflake homepage: {app['displayName']}")
                         apps.append(app)
-                        # Stop processing after finding the first match
-                        return apps
-                elif app['displayName'].startswith('ADP AWS'):
-                    # For ADP AWS apps, also check for Snowflake homepage
-                    app_details = make_graph_request(f"servicePrincipals/{app['id']}", token)
-                    
-                    # Check if homepage URL contains www.snowflake.com as a substring
-                    if 'homepage' in app_details and 'www.snowflake.com' in app_details['homepage']:
-                        print(f"Found matching app with Snowflake homepage: {app['displayName']}")
-                        apps.append(app)
-                        # Stop processing after finding the first match
-                        return apps
         
         # Get the next page if available
         next_link = response.get('@odata.nextLink', '').replace('https://graph.microsoft.com/v1.0/', '')
