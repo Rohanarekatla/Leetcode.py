@@ -94,8 +94,15 @@ def get_service_principals(token):
                         # Stop processing after finding the first match
                         return apps
                 elif app['displayName'].startswith('ADP AWS'):
-                    # Add all ADP AWS apps
-                    apps.append(app)
+                    # For ADP AWS apps, also check for Snowflake homepage
+                    app_details = make_graph_request(f"servicePrincipals/{app['id']}", token)
+                    
+                    # Check if homepage URL contains www.snowflake.com as a substring
+                    if 'homepage' in app_details and 'www.snowflake.com' in app_details['homepage']:
+                        print(f"Found matching app with Snowflake homepage: {app['displayName']}")
+                        apps.append(app)
+                        # Stop processing after finding the first match
+                        return apps
         
         # Get the next page if available
         next_link = response.get('@odata.nextLink', '').replace('https://graph.microsoft.com/v1.0/', '')
