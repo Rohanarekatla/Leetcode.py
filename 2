@@ -1,0 +1,280 @@
+import requests
+import json
+import sys
+import os
+import argparse
+from msal import ConfidentialClientApplication
+
+def get_access_token():
+    """Get Microsoft Graph API access token using MSAL."""
+    # These values would typically come from environment variables
+    tenant_id = os.environ.get('AZURE_TENANT_ID')
+    client_id = os.environ.get('AZURE_CLIENT_ID')
+    client_secret = os.environ.get('AZURE_CLIENT_SECRET')
+    
+    if not all([tenant_id, client_id, client_secret]):
+        print("Missing required environment variables for authentication.")
+        print("Please set: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET")
+        sys.exit(1)
+    
+    # Initialize the MSAL client
+    app = ConfidentialClientApplication(
+        client_id=client_id,
+        client_credential=client_secret,
+        authority=f"https://login.microsoftonline.com/{tenant_id}"
+    )
+    
+    # Acquire token for Microsoft Graph
+    scopes = ['https://graph.microsoft.com/.default']
+    result = app.acquire_token_for_client(scopes=scopes)
+    
+    if 'access_token' not in result:
+        print(f"Error getting access token: {result.get('error_description', '')}")
+        sys.exit(1)
+    
+    return result['access_token']
+
+def make_graph_request(endpoint, token, method='GET', data=None, params=None):
+    """Make a request to Microsoft Graph API."""
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json'
+    }
+    
+    url = f'https://graph.microsoft.com/v1.0/{endpoint}'
+    
+    try:
+        if method == 'GET':
+            response = requests.get(url, headers=headers, params=params)
+        elif method == 'POST':
+            response = requests.post(url, headers=headers, json=data)
+        
+        response.raise_for_status()
+        
+        if response.status_code == 204:  # No content
+            return {}
+        
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error making request to {url}: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"Response content: {e.response.text}")
+        sys.exit(1)
+
+def get_service_principals_by_names(app_names, token):
+    """Get service principals by their display names."""
+    matching_apps = []
+    
+    for app_name in app_names:
+        # Create filter for exact match on display name
+        params = {
+            '$select': 'displayName,id,appRoles',
+            '$filter': f"displayName eq '{app_name}'"
+        }
+        
+        response = make_graph_request('servicePrincipals', token, params=params)
+        
+        if 'value' in response and response['value']:
+            matching_apps.extend(response['value'])
+        else:
+            print(f"Warning: No service principal found with name: {app_name}")
+    
+    return matching_apps
+
+def list_available_apps(token, prefix=None):
+    """List available service principals, optionally filtered by prefix."""
+    params = {
+        '$select': 'displayName',
+        '$top': 100  # Limit results to 100 for performance
+    }
+    
+    if prefix:
+        params['$filter'] = f"startsWith(displayName, '{prefix}')"
+    
+    response = make_graph_request('servicePrincipals', token, params=params)
+    
+    if 'value' in response:
+        app_names = [app['displayName'] for app in response['value']]
+        app_names.sort()
+        return app_names
+    
+    return []
+
+def get_existing_app_role_assignments(group_id, token):
+    """Get all existing app role assignments for a group."""
+    endpoint = f'groups/{group_id}/appRoleAssignments'
+    return make_graph_request(endpoint, token)
+
+def check_if_assignment_exists(group_id, role_id, resource_id, token):
+    """Check if the specific app role assignment already exists."""
+    assignments = get_existing_app_role_assignments(group_id, token).get('value', [])
+    
+    for assignment in assignments:
+        if (assignment.get('appRoleId') == role_id and 
+            assignment.get('resourceId') == resource_id):
+            return True
+    
+    return False
+
+def create_app_role_assignment(group_id, role_id, resource_id, token):
+    """Create an app role assignment for a group if it doesn't already exist."""
+    # First check if assignment already exists
+    if check_if_assignment_exists(group_id, role_id, resource_id, token):
+        print("  - Assignment already exists, skipping.")
+        return {"status": "skipped", "message": "Assignment already exists"}
+    
+    endpoint = f'groups/{group_id}/appRoleAssignments'
+    
+    data = {
+        "principalId": group_id,
+        "resourceId": resource_id,
+        "appRoleId": role_id
+    }
+    
+    try:
+        return make_graph_request(endpoint, token, method='POST', data=data)
+    except Exception as e:
+        print(f"  - Error creating role assignment: {e}")
+        return None
+
+def get_group_id(group_name, token):
+    """Get the object ID for a group by its display name."""
+    params = {
+        '$filter': f"displayName eq '{group_name}'",
+        '$select': 'id'
+    }
+    
+    response = make_graph_request('groups', token, params=params)
+    
+    if not response.get('value'):
+        print(f"Group not found: {group_name}")
+        return None
+    
+    return response['value'][0]['id']
+
+def process_group_config_file(filename):
+    """Process the groups.config file as in the Terraform code."""
+    try:
+        with open(filename, 'r') as f:
+            content = f.read()
+            
+        # Split content into lines
+        lines = content.split("\n")
+        
+        # Filter out empty lines
+        filtered_lines = [line for line in lines if line.strip() != ""]
+        
+        # Process each line - remove "read" and "write" strings, then trim whitespace
+        group_names = [line.replace("read", "").replace("write", "").strip() for line in filtered_lines]
+            
+    except FileNotFoundError:
+        print(f"Config file '{filename}' not found")
+        sys.exit(1)
+    
+    if not group_names:
+        print("No group names found in config file")
+        sys.exit(1)
+        
+    return group_names
+
+def get_user_input_app_names():
+    """Get application names from user input."""
+    print("\nEnter application names (one per line). Press Enter twice when done:")
+    
+    app_names = []
+    while True:
+        line = input()
+        if not line:
+            break
+        app_names.append(line.strip())
+    
+    return app_names
+
+def main():
+    parser = argparse.ArgumentParser(description='Assign Azure AD app roles to groups')
+    parser.add_argument('--apps', nargs='+', help='Space-separated list of app names to process')
+    parser.add_argument('--list', action='store_true', help='List available applications')
+    parser.add_argument('--prefix', help='When listing apps, filter by this prefix')
+    parser.add_argument('--groups-file', default='groups.config', help='Path to the groups config file (default: groups.config)')
+    args = parser.parse_args()
+    
+    # 1. Get authentication token
+    token = get_access_token()
+    
+    # If --list flag is provided, just list available apps and exit
+    if args.list:
+        print("Listing available applications...")
+        apps = list_available_apps(token, args.prefix)
+        if apps:
+            print("\nAvailable applications:")
+            for i, app in enumerate(apps, 1):
+                print(f"  {i}. {app}")
+        else:
+            print("No applications found.")
+        sys.exit(0)
+    
+    # 2. Get app names either from command line or user input
+    app_names = []
+    if args.apps:
+        app_names = args.apps
+    else:
+        app_names = get_user_input_app_names()
+    
+    if not app_names:
+        print("No application names provided. Use --apps or provide names via input.")
+        sys.exit(1)
+    
+    print(f"\nProcessing {len(app_names)} application(s)...")
+    
+    # 3. Get service principals for the specified app names
+    apps = get_service_principals_by_names(app_names, token)
+    
+    if not apps:
+        print("No matching service principals found")
+        sys.exit(0)
+    
+    print(f"Found {len(apps)} matching service principals")
+    
+    # 4. Process group names from config file
+    group_names = process_group_config_file(args.groups_file)
+    print(f"Found {len(group_names)} groups in config file")
+    
+    # 5. Get group IDs
+    print("Fetching group IDs...")
+    group_ids = {}
+    for name in group_names:
+        group_id = get_group_id(name, token)
+        if group_id:
+            group_ids[name] = group_id
+    
+    if not group_ids:
+        print("No valid groups found")
+        sys.exit(1)
+    
+    # 6. Create role assignments
+    for app in apps:
+        app_name = app['displayName']
+        sp_id = app['id']  # In Graph API, it's 'id' not 'objectId'
+        app_roles = app.get('appRoles', [])
+        
+        if not app_roles:
+            print(f"No app roles found for {app_name}")
+            continue
+        
+        first_role_id = app_roles[0]['id']
+        
+        print(f"\nProcessing app: {app_name}")
+        for group_name, group_id in group_ids.items():
+            print(f"  Processing role for group: {group_name}...")
+            result = create_app_role_assignment(group_id, first_role_id, sp_id, token)
+            
+            if result:
+                if result.get("status") == "skipped":
+                    print(f"    Skipped: Role assignment already exists")
+                else:
+                    print(f"    Success: Role assigned")
+            else:
+                print(f"    Failed: Could not assign role")
+
+if __name__ == "__main__":
+    main()
