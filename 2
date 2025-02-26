@@ -1,137 +1,81 @@
-Here's the modified script with only a single input using sys.argv[1]:
+Let me provide an even simpler script that just takes the app name as a command line argument:
 
 ```python
 import requests
-import json
 import sys
 import os
 from msal import ConfidentialClientApplication
 
-def get_access_token():
+def get_token():
     tenant_id = os.environ.get('AZURE_TENANT_ID')
     client_id = os.environ.get('AZURE_CLIENT_ID')
     client_secret = os.environ.get('AZURE_CLIENT_SECRET')
-    
-    if not all([tenant_id, client_id, client_secret]):
-        sys.exit(1)
-    
-    app = ConfidentialClientApplication(
-        client_id=client_id,
-        client_credential=client_secret,
-        authority=f"https://login.microsoftonline.com/{tenant_id}"
-    )
-    
+    app = ConfidentialClientApplication(client_id, client_secret, f"https://login.microsoftonline.com/{tenant_id}")
     result = app.acquire_token_for_client(scopes=['https://graph.microsoft.com/.default'])
-    
-    if 'access_token' not in result:
-        sys.exit(1)
-    
-    return result['access_token']
+    return result.get('access_token')
 
-def make_graph_request(endpoint, token, method='GET', data=None, params=None):
-    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+def req(endpoint, token, method='GET', data=None, params=None):
     url = f'https://graph.microsoft.com/v1.0/{endpoint}'
-    
+    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
     try:
         if method == 'GET':
-            response = requests.get(url, headers=headers, params=params)
-        elif method == 'POST':
-            response = requests.post(url, headers=headers, json=data)
-        
-        response.raise_for_status()
-        return {} if response.status_code == 204 else response.json()
+            resp = requests.get(url, headers=headers, params=params)
+        else:
+            resp = requests.post(url, headers=headers, json=data)
+        resp.raise_for_status()
+        return {} if resp.status_code == 204 else resp.json()
     except:
-        sys.exit(1)
+        return {}
 
-def get_service_principals_by_names(app_names, token):
-    matching_apps = []
-    
-    for app_name in app_names:
-        params = {'$select': 'displayName,id,appRoles', '$filter': f"displayName eq '{app_name}'"}
-        response = make_graph_request('servicePrincipals', token, params=params)
-        
-        if 'value' in response and response['value']:
-            matching_apps.extend(response['value'])
-    
-    return matching_apps
+def get_app(name, token):
+    params = {'$select': 'displayName,id,appRoles', '$filter': f"displayName eq '{name}'"}
+    resp = req('servicePrincipals', token, params=params)
+    return resp.get('value', [])[0] if resp.get('value') else None
 
-def get_existing_app_role_assignments(group_id, token):
-    return make_graph_request(f'groups/{group_id}/appRoleAssignments', token)
-
-def check_if_assignment_exists(group_id, role_id, resource_id, token):
-    assignments = get_existing_app_role_assignments(group_id, token).get('value', [])
-    
-    for assignment in assignments:
-        if assignment.get('appRoleId') == role_id and assignment.get('resourceId') == resource_id:
-            return True
-    
-    return False
-
-def create_app_role_assignment(group_id, role_id, resource_id, token):
-    if check_if_assignment_exists(group_id, role_id, resource_id, token):
-        return {"status": "skipped"}
-    
-    data = {"principalId": group_id, "resourceId": resource_id, "appRoleId": role_id}
-    
+def get_groups():
     try:
-        return make_graph_request(f'groups/{group_id}/appRoleAssignments', token, method='POST', data=data)
+        with open('groups.config', 'r') as f:
+            return [line.replace("read", "").replace("write", "").strip() for line in f if line.strip()]
     except:
-        return None
+        return []
 
-def get_group_id(group_name, token):
-    params = {'$filter': f"displayName eq '{group_name}'", '$select': 'id'}
-    response = make_graph_request('groups', token, params=params)
-    
-    if not response.get('value'):
-        return None
-    
-    return response['value'][0]['id']
+def get_group_id(name, token):
+    params = {'$filter': f"displayName eq '{name}'", '$select': 'id'}
+    resp = req('groups', token, params=params)
+    return resp.get('value', [{}])[0].get('id') if resp.get('value') else None
 
-def process_group_config_file(filename):
-    try:
-        with open(filename, 'r') as f:
-            content = f.read()
-        lines = content.split("\n")
-        filtered_lines = [line for line in lines if line.strip() != ""]
-        return [line.replace("read", "").replace("write", "").strip() for line in filtered_lines]
-    except:
-        sys.exit(1)
+def assign_role(group_id, role_id, sp_id, token):
+    data = {"principalId": group_id, "resourceId": sp_id, "appRoleId": role_id}
+    return req(f'groups/{group_id}/appRoleAssignments', token, 'POST', data)
 
 def main():
     if len(sys.argv) < 2:
-        sys.exit(1)
+        return
     
-    app_name = sys.argv[1]
-    token = get_access_token()
+    token = get_token()
+    if not token:
+        return
     
-    apps = get_service_principals_by_names([app_name], token)
-    if not apps:
-        sys.exit(0)
+    app = get_app(sys.argv[1], token)
+    if not app or not app.get('appRoles'):
+        return
     
-    group_names = process_group_config_file('groups.config')
+    role_id = app['appRoles'][0]['id']
+    sp_id = app['id']
     
-    group_ids = {}
-    for name in group_names:
-        group_id = get_group_id(name, token)
+    for group_name in get_groups():
+        group_id = get_group_id(group_name, token)
         if group_id:
-            group_ids[name] = group_id
-    
-    if not group_ids:
-        sys.exit(1)
-    
-    for app in apps:
-        app_name = app['displayName']
-        sp_id = app['id']
-        app_roles = app.get('appRoles', [])
-        
-        if not app_roles:
-            continue
-        
-        first_role_id = app_roles[0]['id']
-        
-        for group_id in group_ids.values():
-            create_app_role_assignment(group_id, first_role_id, sp_id, token)
+            assign_role(group_id, role_id, sp_id, token)
 
 if __name__ == "__main__":
     main()
 ```
+
+This script:
+1. Takes the app name from `sys.argv[1]`
+2. Gets an access token
+3. Finds the service principal with the given name
+4. Reads groups from groups.config
+5. For each group, assigns the first app role from the service principal
+6. Has minimal error handling and no output​​​​​​​​​​​​​​​​
