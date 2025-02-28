@@ -1,0 +1,20 @@
+# provider.tf
+provider "github" {
+  owner = ""
+  token = "ghp_xxxxxxxxxxxxx"  # Valid token with `repo` scope
+}
+
+# main.tf
+data "github_repository" "test-repo" {
+  full_name = "JSoni/test-repo"
+}
+
+data "github_repository_file" "text" {
+  repository = data.github_repository.test-repo.full_name
+  branch     = "main"
+  file       = "text.txt"
+}
+
+output "file_content" {
+  value = try(nonsensitive(data.github_repository_file.text.content), "Content not found")
+}
