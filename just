@@ -1,18 +1,43 @@
-def load_all_mappings(file_path):
-    mappings = {}
-    current_mapping = None
+import requests
+from msrestazure.azure_active_directory import ServicePrincipalCredentials
 
-    with open(file_path, "r") as f:
-        for line in f:
-            line = line.strip()
+def add_user_to_app_owners(tenant_id, app_display_name, user_upn, client_id, client_secret):
+    # Auth
+    credentials = ServicePrincipalCredentials(
+        client_id=client_id,
+        secret=client_secret,
+        tenant=tenant_id,
+        resource='https://graph.microsoft.com'
+    )
+    
+    headers = {
+        'Authorization': f'Bearer {credentials.token["access_token"]}',
+        'Content-Type': 'application/json'
+    }
+    
+    # Find app by display name
+    app_response = requests.get(
+        f'https://graph.microsoft.com/v1.0/servicePrincipals?$filter=displayName eq \'{app_display_name}\'', 
+        headers=headers
+    )
+    app_id = app_response.json()['value'][0]['id']
+    
+    # Find user by UPN
+    user_response = requests.get(f'https://graph.microsoft.com/v1.0/users/{user_upn}', headers=headers)
+    user_id = user_response.json()['id']
+    
+    # Add user as owner
+    return requests.post(
+        f'https://graph.microsoft.com/v1.0/servicePrincipals/{app_id}/owners/$ref',
+        headers=headers,
+        json={"@odata.id": f"https://graph.microsoft.com/v1.0/users/{user_id}"}
+    ).status_code == 204
 
-            # Check if it's a new mapping section
-            if line.startswith("[") and line.endswith("]"):
-                current_mapping = line[1:-1]  # Get section name without brackets
-                mappings[current_mapping] = {}
-            elif ":" in line and current_mapping:
-                # Parse key-value pairs
-                key, value = line.split(":")
-                mappings[current_mapping][key.strip()] = value.strip()
-
-    return mappings
+if __name__ == "__main__":
+    add_user_to_app_owners(
+        tenant_id="your-tenant-id",
+        app_display_name="App Name",
+        user_upn="user@domain.com",
+        client_id="your-client-id",
+        client_secret="your-client-secret"
+    )
