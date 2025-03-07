@@ -20,13 +20,16 @@ def parse_snowflake_data(content):
     pattern = r'SNOWFLAKE ACCOUNT NAME\s+:\s+([\w\.]+\.snowflakecomputing\.com)[\s\S]+?(?=SNOWFLAKE ACCOUNT NAME|$)'
     account_sections = re.findall(pattern, content)
     
-    for i, account_url in enumerate(account_sections):
-        if i < len(account_sections) - 1:
-            section = re.search(f'SNOWFLAKE ACCOUNT NAME\s+:\s+{re.escape(account_url)}[\\s\\S]+?(?=SNOWFLAKE ACCOUNT NAME)', content).group(0)
-        else:
-            section = re.search(f'SNOWFLAKE ACCOUNT NAME\s+:\s+{re.escape(account_url)}[\\s\\S]+', content).group(0)
+    for account_url in account_sections:
+        section_pattern = f'SNOWFLAKE ACCOUNT NAME\\s+:\\s+{re.escape(account_url)}([\\s\\S]+?)(?=SNOWFLAKE ACCOUNT NAME|$)'
+        section_match = re.search(section_pattern, content)
         
+        if not section_match:
+            continue
+            
+        section = section_match.group(1)
         account_data = {'url': account_url, 'details': {}}
+        
         fields = {
             'ACCOUNT_NAME': r"'ACCOUNT_NAME':\s+'([^']+)'",
             'PERIODIC_DATA_REKEYING': r"'PERIODIC_DATA_REKEYING':\s+'([^']+)'",
@@ -50,39 +53,56 @@ def parse_snowflake_data(content):
     return accounts
 
 def generate_html_report(accounts):
-    """Generate HTML email content from the parsed account data"""
-    html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 20px; }}
-            .report-container {{ border: 1px solid #ddd; padding: 20px; }}
-            .account-section {{ margin-bottom: 30px; }}
-            table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
-            th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }}
-            th {{ background-color: #f5f5f5; }}
-        </style>
-    </head>
-    <body>
-        <div class="report-container">
-            <h2>Snowflake Configuration Report</h2>
-            <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-    """
+    """Generate HTML email content with properly formatted tables"""
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Snowflake Configuration Report</title>
+</head>
+<body style="font-family: Arial, sans-serif; margin: 20px; color: #333;">
+    <div style="max-width: 1000px; margin: 0 auto;">
+        <h2 style="color: #0066b2; border-bottom: 2px solid #eee; padding-bottom: 10px;">
+            Snowflake Account Configuration Report
+        </h2>
+        <p style="color: #666; font-size: 0.9em;">
+            Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        </p>"""
     
     for account in accounts:
         html += f"""
-            <div class="account-section">
-                <h3>{account['url']}</h3>
-                <table>
-                    <tr><th>Configuration</th><th>Value</th></tr>
-        """
+        <div style="margin: 30px 0; padding: 20px; background: #f8f9fa; border-radius: 5px;">
+            <h3 style="color: #444; margin-top: 0;">
+                Account: <span style="color: #0066b2;">{account['url']}</span>
+            </h3>
+            <table style="width: 100%; border-collapse: collapse; background: white;">
+                <thead>
+                    <tr style="background-color: #0066b2; color: white;">
+                        <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Configuration</th>
+                        <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Value</th>
+                    </tr>
+                </thead>
+                <tbody>"""
+        
         for key, value in account['details'].items():
-            if key == "omgomgsws_SP": continue
-            html += f"<tr><td>{key}</td><td>{value}</td></tr>"
-        html += "</table></div>"
+            if key == "omgomgsws_SP":
+                continue
+            html += f"""
+                    <tr>
+                        <td style="padding: 12px; border: 1px solid #ddd; vertical-align: top; width: 40%;">{key}</td>
+                        <td style="padding: 12px; border: 1px solid #ddd; vertical-align: top;">{value}</td>
+                    </tr>"""
+        
+        html += """
+                </tbody>
+            </table>
+        </div>"""
     
-    html += "</div></body></html>"
+    html += """
+    </div>
+</body>
+</html>"""
+    
     return html
 
 def send_email_smtp(smtp_host, smtp_port, from_addr, to_addrs, subject, html_body):
@@ -106,25 +126,34 @@ def send_email_smtp(smtp_host, smtp_port, from_addr, to_addrs, subject, html_bod
 def main():
     # Configuration
     config_file_path = "snowflake_config.out"
-    email_recipients = ["recipient@example.com"]  # List of recipients
-    email_subject = f"Snowflake Report - {datetime.now().strftime('%Y-%m-%d')}"
+    email_recipients = ["recipient@example.com"]  # List of recipient emails
+    email_subject = f"Snowflake Configuration Report - {datetime.now().strftime('%Y-%m-%d')}"
     
-    # SMTP Configuration (Update these for your environment)
-    SMTP_HOST = 'your.smtp.server.com'  # e.g., 'smtp.corporate.com'
+    # SMTP Configuration (Update these values)
+    SMTP_HOST = 'your-smtp-server.com'  # e.g., 'smtp.corporate.com'
     SMTP_PORT = 25                      # Common ports: 25, 587
-    FROM_ADDR = 'noreply@example.com'    # Sender email address
+    FROM_ADDR = 'reports@example.com'   # Sender email address
 
-    # Process report
+    # Process the config file
     content = read_config_file(config_file_path)
-    if not content: return
+    if not content:
+        print("Failed to read config file")
+        return
 
     accounts = parse_snowflake_data(content)
-    if not accounts: return
+    if not accounts:
+        print("No account data found")
+        return
 
+    # Generate HTML report
     html_report = generate_html_report(accounts)
     
+    # Optional: Save report for debugging
+    with open("latest_report.html", "w") as f:
+        f.write(html_report)
+    
     # Send email
-    sent = send_email_smtp(
+    success = send_email_smtp(
         SMTP_HOST,
         SMTP_PORT,
         FROM_ADDR,
@@ -133,10 +162,10 @@ def main():
         html_report
     )
     
-    if sent:
-        print("Process completed successfully.")
+    if success:
+        print("Report generated and sent successfully")
     else:
-        print("Failed to send email.")
+        print("Failed to send report")
 
 if __name__ == "__main__":
     main()
