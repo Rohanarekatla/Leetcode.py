@@ -1,10 +1,8 @@
 import re
-import os
 import smtplib
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.mime.application import MIMEApplication
 
 def read_config_file(file_path):
     """Read and parse the .out config file"""
@@ -55,65 +53,50 @@ def generate_html_report(accounts):
     """Generate HTML email content from the parsed account data"""
     html = f"""
     <!DOCTYPE html>
-    <html lang="en">
+    <html>
     <head>
-        <!-- Same HTML/CS structure as before -->
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 20px; }}
+            .report-container {{ border: 1px solid #ddd; padding: 20px; }}
+            .account-section {{ margin-bottom: 30px; }}
+            table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+            th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }}
+            th {{ background-color: #f5f5f5; }}
+        </style>
     </head>
     <body>
         <div class="report-container">
-            <div class="report-header">
-                Snowflake Account Configuration Report
-            </div>
-            <div class="report-date">
-                Report Date: {datetime.now().strftime("%A, %B %d, %Y")}
-            </div>
+            <h2>Snowflake Configuration Report</h2>
+            <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
     """
     
     for account in accounts:
         html += f"""
             <div class="account-section">
-                <div class="account-name">
-                    SNOWFLAKE ACCOUNT: <span style="color: #0066b2;">{account['url']}</span>
-                </div>
+                <h3>{account['url']}</h3>
                 <table>
                     <tr><th>Configuration</th><th>Value</th></tr>
         """
         for key, value in account['details'].items():
             if key == "omgomgsws_SP": continue
-            html += f"""<tr><td>{key}</td><td>{value}</td></tr>"""
-        html += """</table></div>"""
+            html += f"<tr><td>{key}</td><td>{value}</td></tr>"
+        html += "</table></div>"
     
-    html += """</div></body></html>"""
+    html += "</div></body></html>"
     return html
 
-def send_email_smtp(smtp_host, smtp_port, smtp_user, smtp_pass, from_addr, to_addrs, subject, html_body, attachment_path=None):
-    """Send email via SMTP server with HTML content and optional attachment"""
+def send_email_smtp(smtp_host, smtp_port, from_addr, to_addrs, subject, html_body):
+    """Send email via SMTP server without authentication"""
     try:
         msg = MIMEMultipart()
         msg['From'] = from_addr
-        msg['To'] = ', '.join(to_addrs.split(';'))
+        msg['To'] = ', '.join(to_addrs)
         msg['Subject'] = subject
-
-        # Attach HTML body
         msg.attach(MIMEText(html_body, 'html'))
 
-        # Attach file if specified
-        if attachment_path and os.path.exists(attachment_path):
-            with open(attachment_path, "rb") as f:
-                part = MIMEApplication(f.read(), Name=os.path.basename(attachment_path))
-            part['Content-Disposition'] = f'attachment; filename="{os.path.basename(attachment_path)}"'
-            msg.attach(part)
-
-        # Connect to server
-        if smtp_port == 465:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port)
-        else:
-            server = smtplib.SMTP(smtp_host, smtp_port)
-            server.starttls()
-
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(from_addr, [addr.strip() for addr in to_addrs.split(';')], msg.as_string())
-        server.quit()
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.sendmail(from_addr, to_addrs, msg.as_string())
+        
         print("Email sent successfully!")
         return True
     except Exception as e:
@@ -123,17 +106,15 @@ def send_email_smtp(smtp_host, smtp_port, smtp_user, smtp_pass, from_addr, to_ad
 def main():
     # Configuration
     config_file_path = "snowflake_config.out"
-    email_recipients = "recipient1@example.com;recipient2@example.com"
-    email_subject = f"Snowflake Account Configuration Report - {datetime.now().strftime('%Y-%m-%d')}"
+    email_recipients = ["recipient@example.com"]  # List of recipients
+    email_subject = f"Snowflake Report - {datetime.now().strftime('%Y-%m-%d')}"
     
-    # SMTP Configuration (Update these values)
-    SMTP_HOST = 'smtp.example.com'
-    SMTP_PORT = 587
-    SMTP_USER = 'your_email@example.com'
-    SMTP_PASS = 'your_password'
-    FROM_ADDR = 'your_email@example.com'
+    # SMTP Configuration (Update these for your environment)
+    SMTP_HOST = 'your.smtp.server.com'  # e.g., 'smtp.corporate.com'
+    SMTP_PORT = 25                      # Common ports: 25, 587
+    FROM_ADDR = 'noreply@example.com'    # Sender email address
 
-    # File processing
+    # Process report
     content = read_config_file(config_file_path)
     if not content: return
 
@@ -142,16 +123,14 @@ def main():
 
     html_report = generate_html_report(accounts)
     
-    # Save report
-    html_file_path = f"snowflake_report_{datetime.now().strftime('%Y%m%d')}.html"
-    with open(html_file_path, 'w') as f:
-        f.write(html_report)
-
     # Send email
     sent = send_email_smtp(
-        SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS,
-        FROM_ADDR, email_recipients, email_subject,
-        html_report, html_file_path
+        SMTP_HOST,
+        SMTP_PORT,
+        FROM_ADDR,
+        email_recipients,
+        email_subject,
+        html_report
     )
     
     if sent:
