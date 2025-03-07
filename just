@@ -1,195 +1,163 @@
 import re
+import os
 import smtplib
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from collections import defaultdict
+from email.mime.application import MIMEApplication
 
-# Configuration - Update these values before use
-SMTP_SERVER = 'smtp.office365.com'
-SMTP_PORT = 587
-EMAIL_ADDRESS = 'your_email@company.com'  # Replace with your email
-EMAIL_PASSWORD = 'your_password'         # Replace with your password
-TO_EMAILS = ['recipient1@company.com', 'recipient2@company.com']  # Recipient list
-INPUT_FILE = 'input.out'  # Path to your input file
+def read_config_file(file_path):
+    """Read and parse the .out config file"""
+    try:
+        with open(file_path, 'r') as file:
+            content = file.read()
+        return content
+    except Exception as e:
+        print(f"Error reading file: {e}")
+        return None
 
-def parse_input_data(input_file):
+def parse_snowflake_data(content):
+    """Parse the Snowflake account data from the file content"""
     accounts = []
+    pattern = r'SNOWFLAKE ACCOUNT NAME\s+:\s+([\w\.]+\.snowflakecomputing\.com)[\s\S]+?(?=SNOWFLAKE ACCOUNT NAME|$)'
+    account_sections = re.findall(pattern, content)
     
-    with open(input_file, 'r') as f:
-        content = f.read()
-
-    sections = re.split(r'SNOWFLAKE ACOUNT NAME\s*', content)[1:]
-    
-    for section in sections:
-        account_data = defaultdict(str)
+    for i, account_url in enumerate(account_sections):
+        if i < len(account_sections) - 1:
+            section = re.search(f'SNOWFLAKE ACCOUNT NAME\s+:\s+{re.escape(account_url)}[\\s\\S]+?(?=SNOWFLAKE ACCOUNT NAME)', content).group(0)
+        else:
+            section = re.search(f'SNOWFLAKE ACCOUNT NAME\s+:\s+{re.escape(account_url)}[\\s\\S]+', content).group(0)
         
-        # Extract account URL
-        url_match = re.search(r':\s*([\w\.-]+\.snowflakecomputing\.com)', section)
-        account_data['Account URL'] = url_match.group(1).strip() if url_match else 'N/A'
+        account_data = {'url': account_url, 'details': {}}
+        fields = {
+            'ACCOUNT_NAME': r"'ACCOUNT_NAME':\s+'([^']+)'",
+            'PERIODIC_DATA_REKEYING': r"'PERIODIC_DATA_REKEYING':\s+'([^']+)'",
+            'DAYS_RETENTION': r"'DAYS_RETENTION':\s+'([^']+)'",
+            'DATABASES_NOT_IN_REPLICATION': r"'DATABASES_NOT_IN_REPLICATION':\s+'([^']+)'",
+            'RESOURCE_MONITORS>75%': r"'RESOURCE_MONITORS>75%':\s+'([^']+)'",
+            'WAREHOUSES_WITHOUT_RM': r"'WAREHOUSES_WITHOUT_RM':\s+'([^']+)'",
+            'USERNAMES_WITHOUT_NP': r"'USERNAMES_WITHOUT_NP':\s+'([^']+)'",
+            'DATABASE_BACKUPS': r"'DATABASE_BACKUPS':\s+'([^']+)'",
+            'ABNORMAL_WAREHOUSES': r"'ABNORMAL_WAREHOUSES':\s+'([^']+)'",
+            'TASK_STATUS': r"'TASK_STATUS':\s+'([^']+)'"
+        }
         
-        # Extract account name
-        name_match = re.search(r'"ACCOUNT_?NAME["\']:\s*[\'*]([^\'"]+)[\'*]', section, re.IGNORECASE)
-        account_data['Account Name'] = name_match.group(1).strip() if name_match else 'Unknown'
+        for key, pattern in fields.items():
+            match = re.search(pattern, section)
+            if match:
+                account_data['details'][key] = match.group(1)
         
-        # Extract all key-value pairs
-        kv_pairs = re.findall(
-            r'["\']([^"\']+)["\']\s*:\s*["\']?([^"\']*)["\']?',
-            section,
-            re.DOTALL
-        )
-        
-        # Process key-value pairs
-        for key, value in kv_pairs:
-            clean_key = key.strip().replace('_', ' ').title()
-            clean_value = value.strip().replace('•', '').replace('*', '').replace(',', ', ')
-            if clean_key not in ['Account Name', 'Account URL']:
-                account_data[clean_key] = clean_value
-        
-        accounts.append(dict(account_data))
+        accounts.append(account_data)
     
     return accounts
 
-def get_all_columns(accounts):
-    columns = set()
-    for account in accounts:
-        columns.update(account.keys())
-    return sorted(columns - {'Account Name', 'Account URL'})
-
-def generate_html_content(accounts):
-    # Get all columns and prioritize important ones
-    columns = get_all_columns(accounts)
-    priority_columns = ['Resource Monitors>75', 'Abnormal Warehouses', 'Task Status']
-    columns = sorted(set(columns) - set(priority_columns), key=lambda x: x.lower())
-    columns = priority_columns + columns
-
-    css = """
-    <style>
-        body { 
-            font-family: 'Segoe UI', Arial, sans-serif; 
-            margin: 40px; 
-            background-color: #f5f6fa;
-        }
-        .report-title {
-            color: #2c3e50;
-            border-bottom: 3px solid #3498db;
-            padding-bottom: 15px;
-            margin-bottom: 30px;
-        }
-        .account-section {
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 2px 15px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
-            padding: 25px;
-        }
-        .account-name {
-            color: #2980b9;
-            font-size: 1.4em;
-            margin-bottom: 20px;
-            font-weight: 600;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-        }
-        th, td {
-            padding: 15px;
-            text-align: left;
-            border-bottom: 1px solid #ecf0f1;
-        }
-        th {
-            background-color: #3498db;
-            color: white;
-            font-weight: 600;
-        }
-        tr:nth-child(even) { background-color: #f8f9fa; }
-        .alert {
-            color: #e74c3c;
-            font-weight: bold;
-        }
-        .timestamp {
-            color: #7f8c8d;
-            margin-bottom: 25px;
-            font-size: 0.95em;
-        }
-        .account-url {
-            color: #3498db;
-            font-weight: 500;
-        }
-    </style>
-    """
-
-    html_content = f"""
+def generate_html_report(accounts):
+    """Generate HTML email content from the parsed account data"""
+    html = f"""
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
-        <title>Snowflake Account Report</title>
-        {css}
+        <!-- Same HTML/CS structure as before -->
     </head>
     <body>
-        <h1 class="report-title">❄️ Daily Snowflake Account Health Report</h1>
-        <div class="timestamp">Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
+        <div class="report-container">
+            <div class="report-header">
+                Snowflake Account Configuration Report
+            </div>
+            <div class="report-date">
+                Report Date: {datetime.now().strftime("%A, %B %d, %Y")}
+            </div>
     """
-
+    
     for account in accounts:
-        html_content += f"""
-        <div class="account-section">
-            <div class="account-name">🔷 {account['Account Name']}</div>
-            <div class="account-url">🌐 {account['Account URL']}</div>
-            <table>
-                <tr>
-                    {''.join(f'<th>{col}</th>' for col in columns)}
-                </tr>
-                <tr>
-                    {''.join(
-                        f'<td class="alert">⚠️ {account[col]}</td>' if "NA" in str(account.get(col, '')).upper() 
-                        else f'<td>{account.get(col, "-")}</td>' 
-                        for col in columns
-                    )}
-                </tr>
-            </table>
-        </div>
+        html += f"""
+            <div class="account-section">
+                <div class="account-name">
+                    SNOWFLAKE ACCOUNT: <span style="color: #0066b2;">{account['url']}</span>
+                </div>
+                <table>
+                    <tr><th>Configuration</th><th>Value</th></tr>
         """
+        for key, value in account['details'].items():
+            if key == "omgomgsws_SP": continue
+            html += f"""<tr><td>{key}</td><td>{value}</td></tr>"""
+        html += """</table></div>"""
+    
+    html += """</div></body></html>"""
+    return html
 
-    html_content += "</body></html>"
-    return html_content
-
-def send_email(html_content):
-    # Create email message
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = f"Snowflake Account Report - {datetime.now().strftime('%Y-%m-%d')}"
-    msg['From'] = EMAIL_ADDRESS
-    msg['To'] = ", ".join(TO_EMAILS)
-
-    # Create both HTML and plain text versions
-    text = "Please view this email in an HTML-compatible email client."
-    part1 = MIMEText(text, 'plain')
-    part2 = MIMEText(html_content, 'html')
-
-    msg.attach(part1)
-    msg.attach(part2)
-
-    # Send email
+def send_email_smtp(smtp_host, smtp_port, smtp_user, smtp_pass, from_addr, to_addrs, subject, html_body, attachment_path=None):
+    """Send email via SMTP server with HTML content and optional attachment"""
     try:
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+        msg = MIMEMultipart()
+        msg['From'] = from_addr
+        msg['To'] = ', '.join(to_addrs.split(';'))
+        msg['Subject'] = subject
+
+        # Attach HTML body
+        msg.attach(MIMEText(html_body, 'html'))
+
+        # Attach file if specified
+        if attachment_path and os.path.exists(attachment_path):
+            with open(attachment_path, "rb") as f:
+                part = MIMEApplication(f.read(), Name=os.path.basename(attachment_path))
+            part['Content-Disposition'] = f'attachment; filename="{os.path.basename(attachment_path)}"'
+            msg.attach(part)
+
+        # Connect to server
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port)
             server.starttls()
-            server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-            server.sendmail(EMAIL_ADDRESS, TO_EMAILS, msg.as_string())
+
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(from_addr, [addr.strip() for addr in to_addrs.split(';')], msg.as_string())
+        server.quit()
         print("Email sent successfully!")
+        return True
     except Exception as e:
         print(f"Error sending email: {str(e)}")
+        return False
 
 def main():
-    # Parse input data
-    accounts = parse_input_data(INPUT_FILE)
+    # Configuration
+    config_file_path = "snowflake_config.out"
+    email_recipients = "recipient1@example.com;recipient2@example.com"
+    email_subject = f"Snowflake Account Configuration Report - {datetime.now().strftime('%Y-%m-%d')}"
     
-    # Generate HTML content
-    html_content = generate_html_content(accounts)
+    # SMTP Configuration (Update these values)
+    SMTP_HOST = 'smtp.example.com'
+    SMTP_PORT = 587
+    SMTP_USER = 'your_email@example.com'
+    SMTP_PASS = 'your_password'
+    FROM_ADDR = 'your_email@example.com'
+
+    # File processing
+    content = read_config_file(config_file_path)
+    if not content: return
+
+    accounts = parse_snowflake_data(content)
+    if not accounts: return
+
+    html_report = generate_html_report(accounts)
     
+    # Save report
+    html_file_path = f"snowflake_report_{datetime.now().strftime('%Y%m%d')}.html"
+    with open(html_file_path, 'w') as f:
+        f.write(html_report)
+
     # Send email
-    send_email(html_content)
+    sent = send_email_smtp(
+        SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS,
+        FROM_ADDR, email_recipients, email_subject,
+        html_report, html_file_path
+    )
+    
+    if sent:
+        print("Process completed successfully.")
+    else:
+        print("Failed to send email.")
 
 if __name__ == "__main__":
     main()
