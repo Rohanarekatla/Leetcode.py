@@ -5,16 +5,17 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from collections import defaultdict
 
-# Email configuration (Update these values)
+# Configuration - Update these values before use
 SMTP_SERVER = 'smtp.office365.com'
 SMTP_PORT = 587
-EMAIL_ADDRESS = 'your_email@company.com'
-EMAIL_PASSWORD = 'your_password'
-TO_EMAILS = ['recipient1@company.com', 'recipient2@company.com']
+EMAIL_ADDRESS = 'your_email@company.com'  # Replace with your email
+EMAIL_PASSWORD = 'your_password'         # Replace with your password
+TO_EMAILS = ['recipient1@company.com', 'recipient2@company.com']  # Recipient list
+INPUT_FILE = 'input.out'  # Path to your input file
 
 def parse_input_data(input_file):
-    # Same parsing function as previous answer
     accounts = []
+    
     with open(input_file, 'r') as f:
         content = f.read()
 
@@ -22,14 +23,23 @@ def parse_input_data(input_file):
     
     for section in sections:
         account_data = defaultdict(str)
+        
+        # Extract account URL
         url_match = re.search(r':\s*([\w\.-]+\.snowflakecomputing\.com)', section)
         account_data['Account URL'] = url_match.group(1).strip() if url_match else 'N/A'
         
+        # Extract account name
         name_match = re.search(r'"ACCOUNT_?NAME["\']:\s*[\'*]([^\'"]+)[\'*]', section, re.IGNORECASE)
         account_data['Account Name'] = name_match.group(1).strip() if name_match else 'Unknown'
         
-        kv_pairs = re.findall(r'["\']([^"\']+)["\']\s*:\s*["\']?([^"\']*)["\']?', section, re.DOTALL)
+        # Extract all key-value pairs
+        kv_pairs = re.findall(
+            r'["\']([^"\']+)["\']\s*:\s*["\']?([^"\']*)["\']?',
+            section,
+            re.DOTALL
+        )
         
+        # Process key-value pairs
         for key, value in kv_pairs:
             clean_key = key.strip().replace('_', ' ').title()
             clean_value = value.strip().replace('•', '').replace('*', '').replace(',', ', ')
@@ -40,35 +50,124 @@ def parse_input_data(input_file):
     
     return accounts
 
+def get_all_columns(accounts):
+    columns = set()
+    for account in accounts:
+        columns.update(account.keys())
+    return sorted(columns - {'Account Name', 'Account URL'})
+
 def generate_html_content(accounts):
-    # Same HTML generation as previous answer with dynamic columns
+    # Get all columns and prioritize important ones
+    columns = get_all_columns(accounts)
+    priority_columns = ['Resource Monitors>75', 'Abnormal Warehouses', 'Task Status']
+    columns = sorted(set(columns) - set(priority_columns), key=lambda x: x.lower())
+    columns = priority_columns + columns
+
     css = """
     <style>
-        /* Maintain the same CSS styles as previous answer */
-        body { font-family: 'Arial', sans-serif; margin: 2em; }
-        .report-title { color: #2c3e50; border-bottom: 2px solid #3498db; }
-        /* ... rest of the CSS styles ... */
+        body { 
+            font-family: 'Segoe UI', Arial, sans-serif; 
+            margin: 40px; 
+            background-color: #f5f6fa;
+        }
+        .report-title {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 15px;
+            margin-bottom: 30px;
+        }
+        .account-section {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 15px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+            padding: 25px;
+        }
+        .account-name {
+            color: #2980b9;
+            font-size: 1.4em;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        th {
+            background-color: #3498db;
+            color: white;
+            font-weight: 600;
+        }
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        .alert {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .timestamp {
+            color: #7f8c8d;
+            margin-bottom: 25px;
+            font-size: 0.95em;
+        }
+        .account-url {
+            color: #3498db;
+            font-weight: 500;
+        }
     </style>
     """
-    
-    # Generate HTML content (same as previous implementation)
-    # ... [rest of HTML generation logic] ...
-    
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Snowflake Account Report</title>
+        {css}
+    </head>
+    <body>
+        <h1 class="report-title">❄️ Daily Snowflake Account Health Report</h1>
+        <div class="timestamp">Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
+    """
+
+    for account in accounts:
+        html_content += f"""
+        <div class="account-section">
+            <div class="account-name">🔷 {account['Account Name']}</div>
+            <div class="account-url">🌐 {account['Account URL']}</div>
+            <table>
+                <tr>
+                    {''.join(f'<th>{col}</th>' for col in columns)}
+                </tr>
+                <tr>
+                    {''.join(
+                        f'<td class="alert">⚠️ {account[col]}</td>' if "NA" in str(account.get(col, '')).upper() 
+                        else f'<td>{account.get(col, "-")}</td>' 
+                        for col in columns
+                    )}
+                </tr>
+            </table>
+        </div>
+        """
+
+    html_content += "</body></html>"
     return html_content
 
 def send_email(html_content):
-    # Create message container
+    # Create email message
     msg = MIMEMultipart('alternative')
     msg['Subject'] = f"Snowflake Account Report - {datetime.now().strftime('%Y-%m-%d')}"
     msg['From'] = EMAIL_ADDRESS
     msg['To'] = ", ".join(TO_EMAILS)
 
-    # Create both HTML and plain-text versions
-    text = "Please view this email in an HTML-compatible client."
+    # Create both HTML and plain text versions
+    text = "Please view this email in an HTML-compatible email client."
     part1 = MIMEText(text, 'plain')
     part2 = MIMEText(html_content, 'html')
 
-    # Attach parts to message
     msg.attach(part1)
     msg.attach(part2)
 
@@ -80,17 +179,16 @@ def send_email(html_content):
             server.sendmail(EMAIL_ADDRESS, TO_EMAILS, msg.as_string())
         print("Email sent successfully!")
     except Exception as e:
-        print(f"Failed to send email: {str(e)}")
+        print(f"Error sending email: {str(e)}")
 
 def main():
-    input_file = "input.out"
+    # Parse input data
+    accounts = parse_input_data(INPUT_FILE)
     
-    # Process data and generate HTML
-    accounts = parse_input_data(input_file)
-    columns = get_all_columns(accounts)
-    html_content = generate_html(accounts, columns)
+    # Generate HTML content
+    html_content = generate_html_content(accounts)
     
-    # Send email directly
+    # Send email
     send_email(html_content)
 
 if __name__ == "__main__":
